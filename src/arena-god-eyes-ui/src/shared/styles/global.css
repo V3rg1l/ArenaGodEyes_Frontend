@@ -1,0 +1,72 @@
+:root {
+  --bg-obsidian: #0d1012;
+  --bg-panel: rgba(17, 22, 27, 0.92);
+  --bg-panel-soft: rgba(24, 29, 36, 0.84);
+  --line-soft: rgba(255, 231, 201, 0.12);
+  --line-strong: rgba(255, 204, 138, 0.3);
+  --text-main: #f3ece1;
+  --text-soft: rgba(243, 236, 225, 0.72);
+  --accent-fire: #ffb55e;
+  --accent-sky: #72c9ff;
+  --accent-blood: #ff7a6a;
+  --accent-growth: #9ed46e;
+  font-family: "Trebuchet MS", "Aptos", sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  color: var(--text-main);
+  background:
+    radial-gradient(circle at top left, rgba(255, 154, 72, 0.18), transparent 26%),
+    radial-gradient(circle at top right, rgba(67, 141, 255, 0.15), transparent 22%),
+    linear-gradient(180deg, #0f1318 0%, #0d1012 52%, #0a0d0f 100%);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+}
+
+body {
+  min-height: 100vh;
+  background: transparent;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+button {
+  border: 0;
+  cursor: pointer;
+}
+
+input,
+textarea {
+  width: 100%;
+  border: 1px solid var(--line-soft);
+  border-radius: 14px;
+  background: rgba(10, 13, 16, 0.78);
+  color: var(--text-main);
+  padding: 0.9rem 1rem;
+}
+
+textarea {
+  min-height: 180px;
+  resize: vertical;
+}
+
+a {
+  color: inherit;
+}
