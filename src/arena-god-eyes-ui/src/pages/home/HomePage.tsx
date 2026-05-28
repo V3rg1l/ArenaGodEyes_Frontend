@@ -1,12 +1,11 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { api } from "../../shared/lib/api";
-import { Panel } from "../../shared/components/Panel";
 import { TimelineMarkerRail } from "../../shared/components/TimelineMarkerRail";
+import { api } from "../../shared/lib/api";
 import type {
   AppSettings,
-  MatchBenchmarkComparisonItem,
   CoachKnowledgeParameterItem,
   CoachSkillItem,
+  MatchBenchmarkComparisonItem,
   MatchLibraryItem,
   MatchReviewDetails,
   MatchSpellMetricItem,
@@ -50,13 +49,90 @@ const emptySettings: AppSettings = {
 };
 
 type GlyphName =
-  | "citadel"
-  | "spark"
+  | "all"
+  | "shuffle"
+  | "three"
+  | "two"
+  | "skirmish"
+  | "clips"
+  | "details"
+  | "coach"
+  | "learning"
+  | "settings"
+  | "scene"
+  | "verify"
+  | "review"
   | "camera"
   | "shield"
-  | "swords"
-  | "radar"
-  | "insight";
+  | "spark"
+  | "status";
+
+type AppView =
+  | "all"
+  | "shuffle"
+  | "3v3"
+  | "2v2"
+  | "skirmish"
+  | "clips"
+  | "details"
+  | "coach"
+  | "learning"
+  | "settings"
+  | "scene"
+  | "verify"
+  | "review";
+
+type SettingsTab = "storage" | "detection" | "application" | "recording" | "advanced";
+type SceneTab = "source" | "video" | "audio";
+type ReviewTab = "overview" | "details" | "coach" | "learning" | "chatgpt" | "json";
+type CaptureMode = "game" | "window" | "monitor";
+
+type SidebarItem = {
+  key: AppView;
+  label: string;
+  icon: GlyphName;
+};
+
+const librarySidebarItems: SidebarItem[] = [
+  { key: "all", label: "All Brackets", icon: "all" },
+  { key: "shuffle", label: "Solo Shuffle", icon: "shuffle" },
+  { key: "3v3", label: "3v3", icon: "three" },
+  { key: "2v2", label: "2v2", icon: "two" },
+  { key: "skirmish", label: "Skirmish", icon: "skirmish" },
+];
+
+const systemSidebarItems: SidebarItem[] = [
+  { key: "clips", label: "Clips", icon: "clips" },
+  { key: "details", label: "Details++", icon: "details" },
+  { key: "coach", label: "Coach Analysis", icon: "coach" },
+  { key: "learning", label: "Learning Database", icon: "learning" },
+  { key: "settings", label: "Settings", icon: "settings" },
+  { key: "scene", label: "Scene", icon: "scene" },
+  { key: "verify", label: "Verify Setup", icon: "verify" },
+];
+
+const settingsTabs: Array<{ key: SettingsTab; label: string }> = [
+  { key: "storage", label: "Storage" },
+  { key: "detection", label: "Detection" },
+  { key: "application", label: "Application" },
+  { key: "recording", label: "Recording" },
+  { key: "advanced", label: "Advanced" },
+];
+
+const sceneTabs: Array<{ key: SceneTab; label: string }> = [
+  { key: "source", label: "Source" },
+  { key: "video", label: "Video" },
+  { key: "audio", label: "Audio" },
+];
+
+const reviewTabs: Array<{ key: ReviewTab; label: string }> = [
+  { key: "overview", label: "Overview" },
+  { key: "details", label: "Details++" },
+  { key: "coach", label: "Coach Findings" },
+  { key: "learning", label: "Learning" },
+  { key: "chatgpt", label: "ChatGPT Analysis" },
+  { key: "json", label: "JSON" },
+];
 
 function toLocalFileSource(path: string | null) {
   if (!path) {
@@ -67,8 +143,7 @@ function toLocalFileSource(path: string | null) {
     return path;
   }
 
-  const normalized = path.replace(/\\/g, "/");
-  return `file:///${normalized}`;
+  return `file:///${path.replace(/\\/g, "/")}`;
 }
 
 function formatDuration(durationSeconds: number) {
@@ -108,7 +183,7 @@ function titleize(input: string | null | undefined) {
 
 function scopeLabel(item: { scope: string; className: string | null; specLabel: string | null }) {
   if (item.scope === "spec" && item.specLabel) {
-    return item.className ? `${item.className} · ${item.specLabel}` : item.specLabel;
+    return item.className ? `${item.className} / ${item.specLabel}` : item.specLabel;
   }
 
   if (item.scope === "class" && item.className) {
@@ -123,7 +198,7 @@ function categoryTone(category: string | null) {
     case "interrupt":
       return "sky";
     case "defensive":
-      return "growth";
+      return "defensive";
     case "stun":
     case "fear":
     case "silence":
@@ -131,11 +206,13 @@ function categoryTone(category: string | null) {
     case "incapacitate":
     case "horror":
     case "root":
-      return "blood";
+    case "cc":
+      return "magic";
     case "offensive_cooldown":
     case "damage":
     case "dot":
-      return "ember";
+    case "burst":
+      return "burst";
     default:
       return "stone";
   }
@@ -144,27 +221,155 @@ function categoryTone(category: string | null) {
 function comparisonTone(status: string) {
   switch (status) {
     case "aligned":
-      return "growth";
+      return "success";
     case "below_target":
     case "above_target":
-      return "blood";
+      return "danger";
     default:
       return "stone";
   }
 }
 
+function resultTone(result: string | null) {
+  switch (result?.toLowerCase()) {
+    case "victory":
+    case "win":
+      return "success";
+    case "loss":
+    case "lose":
+      return "danger";
+    default:
+      return "stone";
+  }
+}
+
+function isLibraryView(view: AppView) {
+  return view === "all" || view === "shuffle" || view === "3v3" || view === "2v2" || view === "skirmish";
+}
+
+function matchesViewFilter(match: MatchLibraryItem, view: AppView) {
+  const bracket = match.bracket.toLowerCase();
+
+  switch (view) {
+    case "shuffle":
+      return bracket.includes("shuffle") || bracket.includes("solo");
+    case "3v3":
+      return bracket.includes("3v3") || bracket.includes("3v");
+    case "2v2":
+      return bracket.includes("2v2") || bracket.includes("2v");
+    case "skirmish":
+      return bracket.includes("skirmish");
+    default:
+      return true;
+  }
+}
+
+function dateBucket(dateValue: string) {
+  const now = new Date();
+  const date = new Date(dateValue);
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startOfTarget = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const diffDays = Math.floor((startOfToday.getTime() - startOfTarget.getTime()) / 86400000);
+
+  if (diffDays <= 0) {
+    return "Today";
+  }
+
+  if (diffDays === 1) {
+    return "Yesterday";
+  }
+
+  if (diffDays < 7) {
+    return "This Week";
+  }
+
+  return "Older";
+}
+
 function Glyph({ name }: { name: GlyphName }) {
   const paths: Record<GlyphName, ReactNode> = {
-    citadel: (
+    all: (
       <>
-        <path d="M4 18V8l4 2 4-4 4 4 4-2v10" />
-        <path d="M8 18v-4h8v4" />
+        <path d="M4 7h16" />
+        <path d="M4 12h16" />
+        <path d="M4 17h16" />
       </>
     ),
-    spark: (
+    shuffle: (
       <>
-        <path d="M12 3v5" />
-        <path d="m8 11 4-3 4 3-4 10z" />
+        <path d="M5 6h4l10 12h2" />
+        <path d="m17 6 4 4-4 4" />
+        <path d="M5 18h4l3-4" />
+      </>
+    ),
+    three: (
+      <>
+        <circle cx="8" cy="12" r="2.5" />
+        <circle cx="15" cy="9" r="2.5" />
+        <circle cx="15" cy="15" r="2.5" />
+      </>
+    ),
+    two: (
+      <>
+        <circle cx="8" cy="12" r="3" />
+        <circle cx="16" cy="12" r="3" />
+      </>
+    ),
+    skirmish: (
+      <>
+        <path d="m7 5 10 14" />
+        <path d="m17 5-10 14" />
+      </>
+    ),
+    clips: (
+      <>
+        <rect x="4" y="6" width="14" height="12" rx="2" />
+        <path d="m18 10 3-2v8l-3-2" />
+      </>
+    ),
+    details: (
+      <>
+        <path d="M5 18V9" />
+        <path d="M10 18V5" />
+        <path d="M15 18v-7" />
+        <path d="M20 18v-4" />
+      </>
+    ),
+    coach: (
+      <>
+        <path d="M12 4a6 6 0 0 1 3.6 10.8c-.8.6-1.3 1.4-1.6 2.2h-4c-.3-.8-.8-1.6-1.6-2.2A6 6 0 0 1 12 4Z" />
+        <path d="M9.5 20h5" />
+      </>
+    ),
+    learning: (
+      <>
+        <path d="M5 7.5 12 4l7 3.5-7 3.5Z" />
+        <path d="M5 12.5 12 16l7-3.5" />
+        <path d="M5 17.5 12 21l7-3.5" />
+      </>
+    ),
+    settings: (
+      <>
+        <circle cx="12" cy="12" r="3" />
+        <path d="M19.4 15a1.6 1.6 0 0 0 .3 1.7l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.7-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.2a1.6 1.6 0 0 0-1-1.5 1.6 1.6 0 0 0-1.7.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.7 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.2a1.6 1.6 0 0 0 1.5-1 1.6 1.6 0 0 0-.3-1.7l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.7.3h.1a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.2a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.7-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.7v.1a1.6 1.6 0 0 0 1.5 1.1H21a2 2 0 1 1 0 4h-.2a1.6 1.6 0 0 0-1.4 1Z" />
+      </>
+    ),
+    scene: (
+      <>
+        <rect x="3.5" y="5.5" width="17" height="11" rx="2.5" />
+        <path d="M8 19h8" />
+      </>
+    ),
+    verify: (
+      <>
+        <path d="m5 12 4 4L19 6" />
+      </>
+    ),
+    review: (
+      <>
+        <rect x="4" y="5" width="16" height="14" rx="2" />
+        <path d="M9 10h6" />
+        <path d="M9 14h3" />
       </>
     ),
     camera: (
@@ -178,25 +383,16 @@ function Glyph({ name }: { name: GlyphName }) {
         <path d="M12 3 20 6v5c0 5-3.3 8.3-8 10-4.7-1.7-8-5-8-10V6z" />
       </>
     ),
-    swords: (
+    spark: (
       <>
-        <path d="m7 4 10 10" />
-        <path d="m17 4-10 10" />
-        <path d="m6 18 2-2" />
-        <path d="m16 18 2-2" />
+        <path d="M12 3v5" />
+        <path d="m8 11 4-3 4 3-4 10z" />
       </>
     ),
-    radar: (
+    status: (
       <>
         <circle cx="12" cy="12" r="8" />
-        <circle cx="12" cy="12" r="4" />
-        <path d="M12 12 18 8" />
-      </>
-    ),
-    insight: (
-      <>
-        <path d="M12 4a6 6 0 0 1 3.6 10.8c-.8.6-1.3 1.4-1.6 2.2h-4c-.3-.8-.8-1.6-1.6-2.2A6 6 0 0 1 12 4Z" />
-        <path d="M9.5 20h5" />
+        <path d="M12 8v4l3 2" />
       </>
     ),
   };
@@ -213,8 +409,8 @@ function Glyph({ name }: { name: GlyphName }) {
 function SnapshotRail({ snapshot }: { snapshot: SpecPerformanceSnapshotItem | null }) {
   if (!snapshot) {
     return (
-      <div className="snapshot-grid">
-        <article className="snapshot-card">
+      <div className="metric-mini-grid">
+        <article className="mini-stat-card">
           <span>No spec profile yet</span>
           <strong>Import more matches</strong>
         </article>
@@ -232,9 +428,9 @@ function SnapshotRail({ snapshot }: { snapshot: SpecPerformanceSnapshotItem | nu
   ] as const;
 
   return (
-    <div className="snapshot-grid">
+    <div className="metric-mini-grid">
       {items.map(([label, value]) => (
-        <article key={label} className="snapshot-card">
+        <article key={label} className="mini-stat-card">
           <span>{label}</span>
           <strong>{value}</strong>
         </article>
@@ -245,7 +441,7 @@ function SnapshotRail({ snapshot }: { snapshot: SpecPerformanceSnapshotItem | nu
 
 function SpellMetricCard({ metric }: { metric: MatchSpellMetricItem }) {
   return (
-    <article className="intel-card spell-card">
+    <article className="intel-card">
       <div className="intel-card-topline">
         <strong>{metric.spellName}</strong>
         <span className={`tone-chip tone-${categoryTone(metric.primaryCategory)}`}>
@@ -254,8 +450,8 @@ function SpellMetricCard({ metric }: { metric: MatchSpellMetricItem }) {
       </div>
       <p className="muted-copy">
         {(metric.className ?? "Unknown class") +
-          (metric.specLabel ? ` · ${metric.specLabel}` : "") +
-          (metric.tacticalPhase ? ` · ${titleize(metric.tacticalPhase)}` : "")}
+          (metric.specLabel ? ` / ${metric.specLabel}` : "") +
+          (metric.tacticalPhase ? ` / ${titleize(metric.tacticalPhase)}` : "")}
       </p>
       <div className="intel-metrics">
         <span>casts {metric.castCount}</span>
@@ -275,8 +471,8 @@ function KnowledgeCard({ item }: { item: CoachKnowledgeParameterItem }) {
         <span className={`tone-chip tone-${categoryTone(item.category)}`}>{titleize(item.category)}</span>
       </div>
       <p className="muted-copy">
-        {scopeLabel(item)} · target {item.targetValue ?? "unknown"}
-        {item.unit ? ` (${item.unit})` : ""} · evidence {item.evidenceCount}
+        {scopeLabel(item)} / target {item.targetValue ?? "unknown"}
+        {item.unit ? ` (${item.unit})` : ""} / evidence {item.evidenceCount}
       </p>
       {item.note ? <p>{item.note}</p> : null}
     </article>
@@ -291,7 +487,7 @@ function SkillCard({ item }: { item: CoachSkillItem }) {
         <span className="tone-chip tone-stone">{scopeLabel(item)}</span>
       </div>
       <p>{item.goal}</p>
-      <p className="muted-copy">evidence {item.evidenceCount}</p>
+      <p className="muted-copy">Evidence {item.evidenceCount}</p>
       {item.drill ? <p>{item.drill}</p> : null}
     </article>
   );
@@ -307,10 +503,10 @@ function BenchmarkComparisonCard({ item }: { item: MatchBenchmarkComparisonItem 
         </span>
       </div>
       <p className="muted-copy">
-        {scopeLabel(item)} · {titleize(item.category)} · evidence {item.evidenceCount}
+        {scopeLabel(item)} / {titleize(item.category)} / evidence {item.evidenceCount}
       </p>
       <p>
-        {item.currentValue ?? "unknown"} → {item.expectedValue ?? "target"}
+        {item.currentValue ?? "unknown"} {"->"} {item.expectedValue ?? "target"}
         {item.unit ? ` (${item.unit})` : ""}
       </p>
       {item.note ? <p className="muted-copy">{item.note}</p> : null}
@@ -323,17 +519,35 @@ function RuleCoachFindingCard({ item }: { item: RuleCoachFindingItem }) {
     <article className="intel-card">
       <div className="intel-card-topline">
         <strong>{item.title}</strong>
-        <span className={`tone-chip tone-${comparisonTone(item.severity === "high" ? "below_target" : "needs_review")}`}>
+        <span className={`tone-chip tone-${item.severity === "high" ? "danger" : "warning"}`}>
           {titleize(item.severity)}
         </span>
       </div>
       <p className="muted-copy">
-        {item.scope} · {titleize(item.category)}
-        {item.relatedMetric ? ` · ${titleize(item.relatedMetric)}` : ""}
+        {item.scope} / {titleize(item.category)}
+        {item.relatedMetric ? ` / ${titleize(item.relatedMetric)}` : ""}
       </p>
       <p>{item.summary}</p>
       <p className="muted-copy">{item.evidence}</p>
       <p>{item.recommendation}</p>
+    </article>
+  );
+}
+
+type SettingsRowProps = {
+  title: string;
+  description: string;
+  controls: ReactNode;
+};
+
+function SettingsRow({ title, description, controls }: SettingsRowProps) {
+  return (
+    <article className="settings-row">
+      <div className="settings-row-copy">
+        <strong>{title}</strong>
+        <p>{description}</p>
+      </div>
+      <div className="settings-row-controls">{controls}</div>
     </article>
   );
 }
@@ -350,6 +564,17 @@ export function HomePage() {
   const [promptText, setPromptText] = useState("");
   const [statusMessage, setStatusMessage] = useState("Workspace warming up.");
   const [isBusy, setIsBusy] = useState(false);
+  const [activeView, setActiveView] = useState<AppView>("all");
+  const [activeSettingsTab, setActiveSettingsTab] = useState<SettingsTab>("storage");
+  const [activeSceneTab, setActiveSceneTab] = useState<SceneTab>("source");
+  const [activeReviewTab, setActiveReviewTab] = useState<ReviewTab>("overview");
+  const [libraryQuery, setLibraryQuery] = useState("");
+  const [onlyWithVideo, setOnlyWithVideo] = useState(false);
+  const [onlyNeedsAnalysis, setOnlyNeedsAnalysis] = useState(false);
+  const [showSensitiveValues, setShowSensitiveValues] = useState(false);
+  const [captureMode, setCaptureMode] = useState<CaptureMode>("window");
+  const [captureCursor, setCaptureCursor] = useState(true);
+  const [sceneTarget, setSceneTarget] = useState<"wow-a" | "wow-b" | "auto">("wow-a");
 
   useEffect(() => {
     void loadDashboard();
@@ -363,6 +588,11 @@ export function HomePage() {
     void loadMatch(selectedMatchId);
   }, [selectedMatchId]);
 
+  const pendingAnalyses = useMemo(
+    () => matches.filter((match) => !match.hasManualAnalysis).length,
+    [matches],
+  );
+
   const libraryStats = useMemo(
     () => ({
       total: matches.length,
@@ -372,15 +602,93 @@ export function HomePage() {
     [matches],
   );
 
+  const filteredMatches = useMemo(() => {
+    const query = libraryQuery.trim().toLowerCase();
+
+    return matches.filter((match) => {
+      if (isLibraryView(activeView) && !matchesViewFilter(match, activeView)) {
+        return false;
+      }
+
+      if (onlyWithVideo && !match.hasVideo) {
+        return false;
+      }
+
+      if (onlyNeedsAnalysis && match.hasManualAnalysis) {
+        return false;
+      }
+
+      if (!query) {
+        return true;
+      }
+
+      const haystack = [
+        match.playerName,
+        match.playerClassName,
+        match.playerSpecLabel,
+        match.bracket,
+        match.mapName,
+        match.resultForPlayer,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+
+      return haystack.includes(query);
+    });
+  }, [activeView, libraryQuery, matches, onlyNeedsAnalysis, onlyWithVideo]);
+
+  const groupedMatches = useMemo(() => {
+    const buckets: Record<string, MatchLibraryItem[]> = {
+      Today: [],
+      Yesterday: [],
+      "This Week": [],
+      Older: [],
+    };
+
+    filteredMatches.forEach((match) => {
+      buckets[dateBucket(match.startedAt)].push(match);
+    });
+
+    return buckets;
+  }, [filteredMatches]);
+
   const categorizedSpells = useMemo(() => {
     if (!selectedMatch) {
       return [];
     }
 
     return [...selectedMatch.spellMetrics]
-      .sort((left, right) => right.castCount + right.totalDamage + right.totalHealing - (left.castCount + left.totalDamage + left.totalHealing))
+      .sort(
+        (left, right) =>
+          right.castCount + right.totalDamage + right.totalHealing -
+          (left.castCount + left.totalDamage + left.totalHealing),
+      )
       .slice(0, 12);
   }, [selectedMatch]);
+
+  const sceneSources = useMemo(
+    () => [
+      {
+        key: "wow-a" as const,
+        title: "WoW Session A",
+        description: settings.wowRetailPath
+          ? "Primary configured client and preferred queue window."
+          : "Primary client slot for your main WoW window.",
+      },
+      {
+        key: "wow-b" as const,
+        title: "WoW Session B",
+        description: "Secondary open WoW client, alt account, or second monitor session.",
+      },
+      {
+        key: "auto" as const,
+        title: "Auto active WoW",
+        description: "Use the active session target when the app starts a recording workflow.",
+      },
+    ],
+    [settings.wowRetailPath],
+  );
 
   async function loadDashboard() {
     setIsBusy(true);
@@ -414,6 +722,27 @@ export function HomePage() {
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : "Failed to load match.");
     }
+  }
+
+  function updateSetting<K extends keyof AppSettings>(key: K, value: AppSettings[K]) {
+    setSettings((current) => ({
+      ...current,
+      [key]: value,
+    }));
+  }
+
+  async function chooseDirectoryFor(
+    key: "recordingDirectory" | "recordingCacheDirectory" | "wowRetailPath" | "combatLogDirectory",
+    label: string,
+  ) {
+    const desktopPath = await window.arenaGodEyesDesktop?.selectDirectory();
+    const fallbackPath = desktopPath ?? window.prompt(`Paste ${label.toLowerCase()} path:`);
+
+    if (!fallbackPath) {
+      return;
+    }
+
+    updateSetting(key, fallbackPath);
   }
 
   async function handleSaveSettings() {
@@ -494,11 +823,7 @@ export function HomePage() {
     try {
       const result = await api.testObsConnection();
       setObsStatus(result);
-      setStatusMessage(
-        result.isReachable
-          ? "OBS connection succeeded."
-          : result.errorMessage ?? "OBS connection failed.",
-      );
+      setStatusMessage(result.isReachable ? "OBS connection succeeded." : result.errorMessage ?? "OBS connection failed.");
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : "Failed to test OBS.");
     } finally {
@@ -655,9 +980,7 @@ export function HomePage() {
       await refreshMatches(selectedMatchId);
       setStatusMessage(`Imported manual analysis and created ${result.markerCount} marker(s).`);
     } catch (error) {
-      setStatusMessage(
-        error instanceof Error ? error.message : "Failed to import manual analysis.",
-      );
+      setStatusMessage(error instanceof Error ? error.message : "Failed to import manual analysis.");
     } finally {
       setIsBusy(false);
     }
@@ -678,694 +1001,1253 @@ export function HomePage() {
     }
   }
 
-  return (
-    <main className="home-page">
-      <section className="hero-stage">
-        <div className="hero-copy">
-          <p className="home-kicker">ArenaGodEyes control room</p>
-          <h1>Arena replay review, recording, and coaching in one desktop workspace.</h1>
-          <p className="home-summary">
-            Blizzard-safe post-match workflow only. Capture with OBS, process with
-            FFmpeg and FFprobe, review evidence on video, and keep growing the local
-            class and spec knowledge base.
-          </p>
-          <div className="hero-badges">
-            <span className="hero-badge"><Glyph name="shield" /> Post-match only</span>
-            <span className="hero-badge"><Glyph name="camera" /> OBS + FFmpeg review</span>
-            <span className="hero-badge"><Glyph name="insight" /> Manual ChatGPT coach loop</span>
-          </div>
-        </div>
+  function openMatch(matchId: string) {
+    setSelectedMatchId(matchId);
+    setActiveView("review");
+    setActiveReviewTab("overview");
+  }
 
-        <div className="hero-signal-grid">
-          <article className="signal-card signal-primary">
-            <p className="signal-label">System pulse</p>
-            <strong>{systemStatus?.status ?? "loading"}</strong>
-            <span>{systemStatus?.safety ?? "Safe post-match analysis only."}</span>
-            <p className="signal-message">{statusMessage}</p>
-          </article>
-          <article className="signal-card signal-mini">
-            <Glyph name="citadel" />
-            <strong>{libraryStats.total}</strong>
-            <span>matches indexed</span>
-          </article>
-          <article className="signal-card signal-mini">
-            <Glyph name="camera" />
-            <strong>{libraryStats.withVideo}</strong>
-            <span>matches with video</span>
-          </article>
-          <article className="signal-card signal-mini">
-            <Glyph name="insight" />
-            <strong>{libraryStats.analyzed}</strong>
-            <span>manual coach reviews</span>
-          </article>
-        </div>
-      </section>
+  function handleSidebarNavigation(view: AppView) {
+    if (view === "details") {
+      if (selectedMatchId) {
+        setActiveView("review");
+        setActiveReviewTab("details");
+      } else {
+        setActiveView("all");
+        setStatusMessage("Select a match first to open Details++.");
+      }
 
-      <section className="command-grid">
-        <aside className="control-column">
-          <Panel
-            title="Arena Setup"
-            eyebrow="Local command deck"
-            actions={
-              <div className="button-row">
-                <button onClick={handleDetectWowPath} disabled={isBusy} type="button">
-                  Detect WoW
-                </button>
-                <button onClick={handleInstallAddon} disabled={isBusy} type="button">
-                  Install Addon
-                </button>
-              </div>
-            }
-          >
-            <div className="settings-grid">
-              <label>
-                <span>WoW Retail Path</span>
-                <input
-                  value={settings.wowRetailPath ?? ""}
-                  onChange={(event) =>
-                    setSettings((current) => ({
-                      ...current,
-                      wowRetailPath: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-              <label>
-                <span>Combat Log Directory</span>
-                <input
-                  value={settings.combatLogDirectory ?? ""}
-                  onChange={(event) =>
-                    setSettings((current) => ({
-                      ...current,
-                      combatLogDirectory: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-              <label>
-                <span>Recording Directory</span>
-                <input
-                  value={settings.recordingDirectory ?? ""}
-                  onChange={(event) =>
-                    setSettings((current) => ({
-                      ...current,
-                      recordingDirectory: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-              <label>
-                <span>OBS Host</span>
-                <input
-                  value={settings.obsHost}
-                  onChange={(event) =>
-                    setSettings((current) => ({
-                      ...current,
-                      obsHost: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-              <label>
-                <span>OBS Port</span>
-                <input
-                  type="number"
-                  value={settings.obsPort}
-                  onChange={(event) =>
-                    setSettings((current) => ({
-                      ...current,
-                      obsPort: Number(event.target.value) || 0,
-                    }))
-                  }
-                />
-              </label>
-              <label>
-                <span>OBS Password</span>
-                <input
-                  type="password"
-                  value={settings.obsPassword ?? ""}
-                  onChange={(event) =>
-                    setSettings((current) => ({
-                      ...current,
-                      obsPassword: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-              <label>
-                <span>FFmpeg Path</span>
-                <input
-                  value={settings.ffmpegExecutablePath ?? ""}
-                  onChange={(event) =>
-                    setSettings((current) => ({
-                      ...current,
-                      ffmpegExecutablePath: event.target.value || null,
-                    }))
-                  }
-                />
-              </label>
-              <label>
-                <span>FFprobe Path</span>
-                <input
-                  value={settings.ffprobeExecutablePath ?? ""}
-                  onChange={(event) =>
-                    setSettings((current) => ({
-                      ...current,
-                      ffprobeExecutablePath: event.target.value || null,
-                    }))
-                  }
-                />
-              </label>
-              <label>
-                <span>OBS Timeout (s)</span>
-                <input
-                  type="number"
-                  value={settings.obsConnectTimeoutSeconds}
-                  onChange={(event) =>
-                    setSettings((current) => ({
-                      ...current,
-                      obsConnectTimeoutSeconds: Number(event.target.value) || 5,
-                    }))
-                  }
-                />
-              </label>
-              <label>
-                <span>Thumbnail Second</span>
-                <input
-                  type="number"
-                  value={settings.videoThumbnailSecond}
-                  onChange={(event) =>
-                    setSettings((current) => ({
-                      ...current,
-                      videoThumbnailSecond: Number(event.target.value) || 5,
-                    }))
-                  }
-                />
-              </label>
-            </div>
+      return;
+    }
 
-            <div className="toggle-row">
-              <label>
-                <input
-                  checked={settings.enableMatchDetection}
-                  onChange={(event) =>
-                    setSettings((current) => ({
-                      ...current,
-                      enableMatchDetection: event.target.checked,
-                    }))
-                  }
-                  type="checkbox"
-                />
-                Enable match detection
-              </label>
-              <label>
-                <input
-                  checked={settings.enableObsRecording}
-                  onChange={(event) =>
-                    setSettings((current) => ({
-                      ...current,
-                      enableObsRecording: event.target.checked,
-                    }))
-                  }
-                  type="checkbox"
-                />
-                Auto OBS recording during detected matches
-              </label>
-            </div>
+    if (view === "coach") {
+      if (selectedMatchId) {
+        setActiveView("review");
+        setActiveReviewTab("coach");
+      } else {
+        setActiveView("all");
+        setStatusMessage("Select a match first to open Coach Analysis.");
+      }
 
-            <p className="signal-message">
-              Live watcher can start OBS on arena start, import the match on arena end,
-              and stop OBS only if this app started the recording.
+      return;
+    }
+
+    if (view === "learning") {
+      if (selectedMatchId) {
+        setActiveView("review");
+        setActiveReviewTab("learning");
+      } else {
+        setActiveView("all");
+        setStatusMessage("Select a match first to open the Learning Database.");
+      }
+
+      return;
+    }
+
+    setActiveView(view);
+  }
+
+  function renderLibraryScreen() {
+    return (
+      <div className="workspace-page">
+        <header className="page-header">
+          <div>
+            <p className="eyebrow">Arena library</p>
+            <h1>{librarySidebarItems.find((item) => item.key === activeView)?.label ?? "Match Library"}</h1>
+            <p className="page-copy">
+              Filter matches by bracket, keep clips and reviews together, and open a full replay workstation when a match needs deeper coaching.
             </p>
+          </div>
+          <div className="page-actions">
+            <button onClick={handleImportSample} disabled={isBusy} type="button">
+              Import Sample
+            </button>
+            <button onClick={handleImportCombatLog} disabled={isBusy} type="button">
+              Import Combat Log
+            </button>
+          </div>
+        </header>
 
-            <div className="button-row">
-              <button onClick={handleSaveSettings} disabled={isBusy} type="button">
-                Save Settings
-              </button>
-              <button onClick={handleValidateSettings} disabled={isBusy} type="button">
-                Validate Setup
-              </button>
-            </div>
+        <section className="toolbar-card">
+          <div className="toolbar-row">
+            <input
+              className="search-input"
+              placeholder="Search player, spec, map, bracket..."
+              value={libraryQuery}
+              onChange={(event) => setLibraryQuery(event.target.value)}
+            />
+            <button
+              className={`filter-toggle ${onlyWithVideo ? "active" : ""}`}
+              onClick={() => setOnlyWithVideo((current) => !current)}
+              type="button"
+            >
+              With video
+            </button>
+            <button
+              className={`filter-toggle ${onlyNeedsAnalysis ? "active" : ""}`}
+              onClick={() => setOnlyNeedsAnalysis((current) => !current)}
+              type="button"
+            >
+              Needs analysis
+            </button>
+          </div>
+          <div className="toolbar-stats">
+            <span>{libraryStats.total} matches</span>
+            <span>{libraryStats.withVideo} with video</span>
+            <span>{pendingAnalyses} pending review</span>
+          </div>
+        </section>
 
-            <div className="button-row">
-              <button onClick={handleTestObsConnection} disabled={isBusy} type="button">
-                Test OBS
-              </button>
-              <button onClick={handleStartObsRecording} disabled={isBusy} type="button">
-                Start Recording
-              </button>
-              <button onClick={handleStopObsRecording} disabled={isBusy} type="button">
-                Stop Recording
-              </button>
-            </div>
-
-            {obsStatus ? (
-              <div className="obs-status-shell">
-                <strong>OBS {obsStatus.isReachable ? "online" : "offline"}</strong>
-                <p>
-                  Version: {obsStatus.obsVersion ?? "unknown"} · Recording:{" "}
-                  {obsStatus.isRecording ? "active" : "idle"}
-                </p>
-                <p>{obsStatus.outputPath ?? obsStatus.errorMessage ?? "No active OBS output path."}</p>
+        {Object.entries(groupedMatches).map(([groupLabel, groupMatches]) =>
+          groupMatches.length === 0 ? null : (
+            <section key={groupLabel} className="library-group">
+              <div className="section-header">
+                <h2>{groupLabel}</h2>
+                <span>{groupMatches.length} matches</span>
               </div>
-            ) : null}
-
-            {validation ? (
-              <div className={`validation-shell ${validation.isValid ? "valid" : "invalid"}`}>
-                <strong>{validation.isValid ? "Healthy setup" : "Setup needs fixes"}</strong>
-                <ul>
-                  {validation.messages.length === 0 ? (
-                    <li>Everything looks ready for local review.</li>
-                  ) : (
-                    validation.messages.map((message) => <li key={message}>{message}</li>)
-                  )}
-                </ul>
-              </div>
-            ) : null}
-          </Panel>
-
-          <Panel
-            title="Import Command Deck"
-            eyebrow="Capture and index"
-            actions={
-              <div className="button-row">
-                <button onClick={handleImportSample} disabled={isBusy} type="button">
-                  Import Sample
-                </button>
-                <button onClick={handleImportCombatLog} disabled={isBusy} type="button">
-                  Import Combat Log
-                </button>
-              </div>
-            }
-          >
-            <div className="snapshot-grid compact-snapshot-grid">
-              <article className="snapshot-card">
-                <span>stored</span>
-                <strong>{libraryStats.total}</strong>
-              </article>
-              <article className="snapshot-card">
-                <span>reviewed</span>
-                <strong>{libraryStats.analyzed}</strong>
-              </article>
-              <article className="snapshot-card">
-                <span>with video</span>
-                <strong>{libraryStats.withVideo}</strong>
-              </article>
-            </div>
-          </Panel>
-
-          <Panel title="Match Library" eyebrow="Replay queue">
-            <div className="match-list">
-              {matches.length === 0 ? (
-                <p className="muted-copy">
-                  Import the sample chunk or a local combat log to populate the library.
-                </p>
-              ) : (
-                matches.map((match) => (
+              <div className="match-grid">
+                {groupMatches.map((match) => (
                   <button
                     key={match.matchId}
-                    className={`match-row ${selectedMatchId === match.matchId ? "active" : ""}`}
-                    onClick={() => setSelectedMatchId(match.matchId)}
+                    className={`match-card-shell ${selectedMatchId === match.matchId ? "active" : ""}`}
+                    onClick={() => openMatch(match.matchId)}
                     type="button"
                   >
-                    <div className="match-row-main">
-                      <strong>{match.playerName ?? "Unknown player"}</strong>
-                      <span>
-                        {[match.playerClassName, match.playerSpecLabel].filter(Boolean).join(" · ") || "Class/spec pending"}
-                      </span>
-                      <span>
-                        {match.bracket} · {match.mapName}
-                      </span>
+                    <div className="match-thumb-shell">
+                      {match.thumbnailPath ? (
+                        <img
+                          alt={`${match.playerName ?? "Match"} thumbnail`}
+                          src={toLocalFileSource(match.thumbnailPath)}
+                        />
+                      ) : (
+                        <div className="match-thumb-fallback">
+                          <Glyph name="camera" />
+                          <span>No preview yet</span>
+                        </div>
+                      )}
+                      <div className="match-badge-row">
+                        <span className="match-badge">{match.bracket}</span>
+                        <span className={`match-badge tone-${resultTone(match.resultForPlayer)}`}>
+                          {match.resultForPlayer ?? "Pending"}
+                        </span>
+                        <span className="match-badge">{formatDuration(match.durationSeconds)}</span>
+                      </div>
                     </div>
-                    <div className="match-row-meta">
-                      <span>{formatDuration(match.durationSeconds)}</span>
-                      <span>{formatDateLabel(match.startedAt)}</span>
-                      <span>{match.timelineMarkerCount} markers</span>
+                    <div className="match-card-body">
+                      <div className="match-card-topline">
+                        <strong>{match.playerName ?? "Unknown player"}</strong>
+                        <span>{formatDateLabel(match.startedAt)}</span>
+                      </div>
+                      <p className="muted-copy">
+                        {[match.playerClassName, match.playerSpecLabel].filter(Boolean).join(" / ") || "Class/spec pending"}
+                      </p>
+                      <p className="muted-copy">{match.mapName}</p>
+                      <div className="match-meta-row">
+                        <span>{match.timelineMarkerCount} markers</span>
+                        <span>{match.hasVideo ? "Video ready" : "No video"}</span>
+                        <span>{match.hasManualAnalysis ? "Analysis ready" : "Awaiting analysis"}</span>
+                      </div>
                     </div>
                   </button>
+                ))}
+              </div>
+            </section>
+          ),
+        )}
+
+        {filteredMatches.length === 0 ? (
+          <div className="empty-state-card">
+            <Glyph name="review" />
+            <strong>No matches in this view yet.</strong>
+            <p>Import a combat log or sample pack to populate the library and start building the review archive.</p>
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  function renderSettingsScreen() {
+    return (
+      <div className="workspace-page narrow-page">
+        <header className="page-header">
+          <div>
+            <p className="eyebrow">Settings</p>
+            <h1>Desktop configuration</h1>
+            <p className="page-copy">
+              Storage, detection, recording, and app preferences stay inside the desktop workflow. Local OBS internals stay hidden unless you explicitly reveal them.
+            </p>
+          </div>
+          <div className="page-actions">
+            <button onClick={handleSaveSettings} disabled={isBusy} type="button">
+              Save Changes
+            </button>
+            <button onClick={handleValidateSettings} disabled={isBusy} type="button">
+              Validate Setup
+            </button>
+          </div>
+        </header>
+
+        <div className="tab-strip">
+          {settingsTabs.map((tab) => (
+            <button
+              key={tab.key}
+              className={`tab-button ${activeSettingsTab === tab.key ? "active" : ""}`}
+              onClick={() => setActiveSettingsTab(tab.key)}
+              type="button"
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        <section className="settings-panel">
+          {activeSettingsTab === "storage" ? (
+            <>
+              <SettingsRow
+                title="Recording Location"
+                description="Final folder for arena recordings and replay assets."
+                controls={
+                  <div className="inline-field-group">
+                    <input
+                      value={settings.recordingDirectory ?? ""}
+                      onChange={(event) => updateSetting("recordingDirectory", event.target.value)}
+                    />
+                    <button onClick={() => void chooseDirectoryFor("recordingDirectory", "Recording Location")} type="button">
+                      Browse
+                    </button>
+                  </div>
+                }
+              />
+              <SettingsRow
+                title="Recording Cache Location"
+                description="Working folder used while long recordings are being staged locally."
+                controls={
+                  <div className="inline-field-group">
+                    <input
+                      value={settings.recordingCacheDirectory ?? ""}
+                      onChange={(event) => updateSetting("recordingCacheDirectory", event.target.value)}
+                    />
+                    <button onClick={() => void chooseDirectoryFor("recordingCacheDirectory", "Recording Cache Location")} type="button">
+                      Browse
+                    </button>
+                  </div>
+                }
+              />
+              <SettingsRow
+                title="Maximum Disk Storage"
+                description="Limit the local recording footprint before cleanup policies start mattering."
+                controls={
+                  <input
+                    className="compact-input"
+                    type="number"
+                    value={settings.maxDiskStorageGb}
+                    onChange={(event) => updateSetting("maxDiskStorageGb", Number(event.target.value) || 0)}
+                  />
+                }
+              />
+              <SettingsRow
+                title="Maximum Match Files"
+                description="Cap how many stored matches are kept before old sessions get pruned later."
+                controls={
+                  <input
+                    className="compact-input"
+                    type="number"
+                    value={settings.maxMatchFiles}
+                    onChange={(event) => updateSetting("maxMatchFiles", Number(event.target.value) || 0)}
+                  />
+                }
+              />
+            </>
+          ) : null}
+
+          {activeSettingsTab === "detection" ? (
+            <>
+              <SettingsRow
+                title="WoW Installation"
+                description="Primary local install used for addon deployment and log detection."
+                controls={
+                  <div className="inline-field-group">
+                    <input
+                      value={settings.wowRetailPath ?? ""}
+                      onChange={(event) => updateSetting("wowRetailPath", event.target.value)}
+                    />
+                    <button onClick={() => void handleDetectWowPath()} type="button">
+                      Detect
+                    </button>
+                  </div>
+                }
+              />
+              <SettingsRow
+                title="Combat Log Directory"
+                description="Folder watched for chunks and manual imports during the MVP."
+                controls={
+                  <div className="inline-field-group">
+                    <input
+                      value={settings.combatLogDirectory ?? ""}
+                      onChange={(event) => updateSetting("combatLogDirectory", event.target.value)}
+                    />
+                    <button onClick={() => void chooseDirectoryFor("combatLogDirectory", "Combat Log Directory")} type="button">
+                      Browse
+                    </button>
+                  </div>
+                }
+              />
+              <SettingsRow
+                title="Arena Match Detection"
+                description="Turn local match detection on or off without exposing backend internals."
+                controls={
+                  <label className="switch-pill">
+                    <input
+                      checked={settings.enableMatchDetection}
+                      onChange={(event) => updateSetting("enableMatchDetection", event.target.checked)}
+                      type="checkbox"
+                    />
+                    <span>{settings.enableMatchDetection ? "Active" : "Inactive"}</span>
+                  </label>
+                }
+              />
+              <SettingsRow
+                title="Track Skirmish Matches"
+                description="Keep skirmishes in the replay archive or leave them out of the review workflow."
+                controls={
+                  <label className="switch-pill">
+                    <input
+                      checked={settings.trackSkirmishMatches}
+                      onChange={(event) => updateSetting("trackSkirmishMatches", event.target.checked)}
+                      type="checkbox"
+                    />
+                    <span>{settings.trackSkirmishMatches ? "Enabled" : "Disabled"}</span>
+                  </label>
+                }
+              />
+              <SettingsRow
+                title="Addon Status"
+                description="Install or reinstall the addon used for safe combat log capture and arena metadata."
+                controls={
+                  <div className="inline-button-group">
+                    <button onClick={handleInstallAddon} disabled={isBusy} type="button">
+                      Install Addon
+                    </button>
+                    <button onClick={handleValidateSettings} disabled={isBusy} type="button">
+                      Validate Setup
+                    </button>
+                  </div>
+                }
+              />
+            </>
+          ) : null}
+
+          {activeSettingsTab === "application" ? (
+            <>
+              <SettingsRow
+                title="Run at startup"
+                description="Launch the desktop workspace automatically when the system session starts."
+                controls={
+                  <label className="switch-pill">
+                    <input
+                      checked={settings.runAtStartup}
+                      onChange={(event) => updateSetting("runAtStartup", event.target.checked)}
+                      type="checkbox"
+                    />
+                    <span>{settings.runAtStartup ? "On" : "Off"}</span>
+                  </label>
+                }
+              />
+              <SettingsRow
+                title="Minimize to tray on close"
+                description="Keep the tool ready in the background instead of fully exiting on close."
+                controls={
+                  <label className="switch-pill">
+                    <input
+                      checked={settings.minimizeToTrayOnClose}
+                      onChange={(event) => updateSetting("minimizeToTrayOnClose", event.target.checked)}
+                      type="checkbox"
+                    />
+                    <span>{settings.minimizeToTrayOnClose ? "On" : "Off"}</span>
+                  </label>
+                }
+              />
+              <SettingsRow
+                title="Show MMR badge"
+                description="Reserve space for rating context on library cards once all data sources are ready."
+                controls={
+                  <label className="switch-pill">
+                    <input
+                      checked={settings.showMmrBadge}
+                      onChange={(event) => updateSetting("showMmrBadge", event.target.checked)}
+                      type="checkbox"
+                    />
+                    <span>{settings.showMmrBadge ? "On" : "Off"}</span>
+                  </label>
+                }
+              />
+              <SettingsRow
+                title="Show only my mistakes by default"
+                description="Bias the review flow toward your own decision points before team-wide analysis."
+                controls={
+                  <label className="switch-pill">
+                    <input
+                      checked={settings.showOnlyMyMistakesByDefault}
+                      onChange={(event) => updateSetting("showOnlyMyMistakesByDefault", event.target.checked)}
+                      type="checkbox"
+                    />
+                    <span>{settings.showOnlyMyMistakesByDefault ? "On" : "Off"}</span>
+                  </label>
+                }
+              />
+              <SettingsRow
+                title="Use list view for matches"
+                description="Keep a denser archive layout available for high-volume replay sessions later."
+                controls={
+                  <label className="switch-pill">
+                    <input
+                      checked={settings.useListViewForMatches}
+                      onChange={(event) => updateSetting("useListViewForMatches", event.target.checked)}
+                      type="checkbox"
+                    />
+                    <span>{settings.useListViewForMatches ? "On" : "Off"}</span>
+                  </label>
+                }
+              />
+            </>
+          ) : null}
+
+          {activeSettingsTab === "recording" ? (
+            <>
+              <SettingsRow
+                title="Recording Enabled"
+                description="Master control for local match recording inside the desktop workflow."
+                controls={
+                  <label className="switch-pill">
+                    <input
+                      checked={settings.enableRecording}
+                      onChange={(event) => updateSetting("enableRecording", event.target.checked)}
+                      type="checkbox"
+                    />
+                    <span>{settings.enableRecording ? "Enabled" : "Disabled"}</span>
+                  </label>
+                }
+              />
+              <SettingsRow
+                title="OBS Recording Integration"
+                description="Use OBS as the recording engine without surfacing localhost and port details in normal settings."
+                controls={
+                  <label className="switch-pill">
+                    <input
+                      checked={settings.enableObsRecording}
+                      onChange={(event) => updateSetting("enableObsRecording", event.target.checked)}
+                      type="checkbox"
+                    />
+                    <span>{settings.enableObsRecording ? "Enabled" : "Disabled"}</span>
+                  </label>
+                }
+              />
+              <SettingsRow
+                title="OBS Health"
+                description="Check connection and test recording state from the product layer."
+                controls={
+                  <div className="inline-button-group">
+                    <button onClick={handleTestObsConnection} disabled={isBusy} type="button">
+                      Test Connection
+                    </button>
+                    <button onClick={handleStartObsRecording} disabled={isBusy} type="button">
+                      Start Test Recording
+                    </button>
+                    <button onClick={handleStopObsRecording} disabled={isBusy} type="button">
+                      Stop Test Recording
+                    </button>
+                  </div>
+                }
+              />
+              <SettingsRow
+                title="Review Utilities"
+                description="Choose how video previews and clip workflows are processed after recording."
+                controls={
+                  <div className="inline-stat-group">
+                    <span className="info-pill">Thumb {settings.videoThumbnailSecond}s</span>
+                    <span className="info-pill">FFmpeg ready when configured</span>
+                    <span className={`info-pill ${obsStatus?.isReachable ? "good" : ""}`}>
+                      {obsStatus?.isReachable ? "OBS connected" : "OBS pending"}
+                    </span>
+                  </div>
+                }
+              />
+            </>
+          ) : null}
+
+          {activeSettingsTab === "advanced" ? (
+            <>
+              <div className="advanced-toggle-row">
+                <button onClick={() => setShowSensitiveValues((current) => !current)} type="button">
+                  {showSensitiveValues ? "Hide Sensitive Values" : "Show Sensitive Values"}
+                </button>
+              </div>
+              <SettingsRow
+                title="OBS Endpoint"
+                description="Internal local endpoint used by the desktop workflow."
+                controls={
+                  <input
+                    className="mono-input"
+                    readOnly
+                    value={
+                      showSensitiveValues
+                        ? `${settings.obsHost}:${settings.obsPort}`
+                        : "Configured locally"
+                    }
+                  />
+                }
+              />
+              <SettingsRow
+                title="OBS Password"
+                description="Masked by default and only revealed explicitly."
+                controls={
+                  <input
+                    className="mono-input"
+                    readOnly
+                    value={
+                      showSensitiveValues
+                        ? settings.obsPassword ?? ""
+                        : settings.obsPassword
+                          ? "••••••••"
+                          : "Not configured"
+                    }
+                  />
+                }
+              />
+              <SettingsRow
+                title="FFmpeg Executable"
+                description="Video utility path used for metadata, thumbnails, and clip generation."
+                controls={
+                  <input
+                    value={showSensitiveValues ? settings.ffmpegExecutablePath ?? "" : "Configured in desktop backend"}
+                    onChange={(event) => updateSetting("ffmpegExecutablePath", event.target.value || null)}
+                    readOnly={!showSensitiveValues}
+                    className="mono-input"
+                  />
+                }
+              />
+              <SettingsRow
+                title="FFprobe Executable"
+                description="Local media inspection utility path."
+                controls={
+                  <input
+                    value={showSensitiveValues ? settings.ffprobeExecutablePath ?? "" : "Configured in desktop backend"}
+                    onChange={(event) => updateSetting("ffprobeExecutablePath", event.target.value || null)}
+                    readOnly={!showSensitiveValues}
+                    className="mono-input"
+                  />
+                }
+              />
+            </>
+          ) : null}
+        </section>
+
+        {validation ? (
+          <div className={`validation-shell ${validation.isValid ? "valid" : "invalid"}`}>
+            <strong>{validation.isValid ? "Setup healthy" : "Setup needs attention"}</strong>
+            <ul>
+              {validation.messages.length === 0 ? (
+                <li>Everything looks ready for local review.</li>
+              ) : (
+                validation.messages.map((message) => <li key={message}>{message}</li>)
+              )}
+            </ul>
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  function renderSceneScreen() {
+    const previewSource = selectedMatch?.match.videoLocalPath ?? selectedMatch?.match.thumbnailPath ?? null;
+
+    return (
+      <div className="workspace-page">
+        <header className="page-header">
+          <div>
+            <p className="eyebrow">Scene</p>
+            <h1>Capture source control</h1>
+            <p className="page-copy">
+              Pick which WoW session this desktop workflow should prefer, then tune capture source, video quality, and audio preferences without exposing low-level OBS network details.
+            </p>
+          </div>
+          <div className="page-actions">
+            <button onClick={handleStartObsRecording} disabled={isBusy} type="button">
+              Start Recording
+            </button>
+            <button onClick={handleStopObsRecording} disabled={isBusy} type="button">
+              Stop Recording
+            </button>
+          </div>
+        </header>
+
+        <section className="scene-preview-card">
+          <div className="scene-preview-frame">
+            {previewSource ? (
+              selectedMatch?.match.videoLocalPath ? (
+                <video
+                  className="scene-video"
+                  controls
+                  src={toLocalFileSource(selectedMatch.match.videoLocalPath)}
+                />
+              ) : (
+                <img
+                  alt="Scene preview"
+                  className="scene-image"
+                  src={toLocalFileSource(previewSource)}
+                />
+              )
+            ) : (
+              <div className="scene-empty">
+                <Glyph name="scene" />
+                <strong>No current source preview yet.</strong>
+                <p>Attach a local video or process a recorded match to use this area as the desktop capture preview surface.</p>
+              </div>
+            )}
+          </div>
+
+          <div className="tab-strip scene-tabs">
+            {sceneTabs.map((tab) => (
+              <button
+                key={tab.key}
+                className={`tab-button ${activeSceneTab === tab.key ? "active" : ""}`}
+                onClick={() => setActiveSceneTab(tab.key)}
+                type="button"
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          {activeSceneTab === "source" ? (
+            <div className="scene-options-grid">
+              <div className="scene-source-list">
+                {sceneSources.map((source) => (
+                  <button
+                    key={source.key}
+                    className={`source-card ${sceneTarget === source.key ? "active" : ""}`}
+                    onClick={() => setSceneTarget(source.key)}
+                    type="button"
+                  >
+                    <strong>{source.title}</strong>
+                    <span>{source.description}</span>
+                  </button>
+                ))}
+              </div>
+              <div className="scene-option-card">
+                <strong>Capture mode</strong>
+                <div className="segmented-row">
+                  {(["game", "window", "monitor"] as CaptureMode[]).map((mode) => (
+                    <button
+                      key={mode}
+                      className={captureMode === mode ? "active" : ""}
+                      onClick={() => setCaptureMode(mode)}
+                      type="button"
+                    >
+                      {titleize(mode)}
+                    </button>
+                  ))}
+                </div>
+                <label className="switch-pill">
+                  <input
+                    checked={captureCursor}
+                    onChange={(event) => setCaptureCursor(event.target.checked)}
+                    type="checkbox"
+                  />
+                  <span>{captureCursor ? "Capture cursor" : "Hide cursor"}</span>
+                </label>
+              </div>
+            </div>
+          ) : null}
+
+          {activeSceneTab === "video" ? (
+            <div className="scene-form-grid">
+              <SettingsRow
+                title="Frame Rate"
+                description="Keep the recording surface aligned with arena readability."
+                controls={<div className="info-pill">60 FPS preferred</div>}
+              />
+              <SettingsRow
+                title="Resolution"
+                description="Target a clear replay feed without bloating local storage."
+                controls={<div className="info-pill">1080p desktop target</div>}
+              />
+              <SettingsRow
+                title="Quality"
+                description="Preserve spell clarity and UI legibility during post-match review."
+                controls={<div className="info-pill">High quality local replay</div>}
+              />
+            </div>
+          ) : null}
+
+          {activeSceneTab === "audio" ? (
+            <div className="scene-form-grid">
+              <SettingsRow
+                title="Desktop Audio"
+                description="Keep arena sound cues available in local playback."
+                controls={<div className="info-pill">Enabled in recording workflow</div>}
+              />
+              <SettingsRow
+                title="Microphone"
+                description="Reserve local mic capture for future clip and coaching commentary workflows."
+                controls={<div className="info-pill">Future configurable source</div>}
+              />
+              <SettingsRow
+                title="Noise handling"
+                description="Audio cleanup remains part of the future recording refinement path."
+                controls={<div className="info-pill">Suppression later</div>}
+              />
+            </div>
+          ) : null}
+        </section>
+      </div>
+    );
+  }
+
+  function renderReviewScreen() {
+    if (!selectedMatch) {
+      return (
+        <div className="workspace-page">
+          <div className="empty-state-card tall-empty">
+            <Glyph name="review" />
+            <strong>Select a match from the library.</strong>
+            <p>Open any bracket view in the sidebar and launch a replay from the match grid to enter the review workstation.</p>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="workspace-page">
+        <header className="page-header review-header">
+          <div>
+            <p className="eyebrow">Review workstation</p>
+            <h1>
+              {selectedMatch.match.playerName ?? "Unknown player"} / {selectedMatch.match.playerClassName ?? "Unknown class"}
+              {selectedMatch.match.playerSpecLabel ? ` / ${selectedMatch.match.playerSpecLabel}` : ""}
+            </h1>
+            <p className="page-copy">
+              {selectedMatch.match.bracket} / {selectedMatch.match.mapName} / {formatDuration(selectedMatch.match.durationSeconds)}
+            </p>
+          </div>
+          <div className="page-actions">
+            <button onClick={handleAttachVideo} disabled={isBusy} type="button">
+              Attach Video
+            </button>
+            <button onClick={handleProcessVideo} disabled={isBusy || !selectedMatch.match.videoLocalPath} type="button">
+              Process Video
+            </button>
+            <button onClick={handleGenerateReviewClips} disabled={isBusy || !selectedMatch.match.videoLocalPath} type="button">
+              Generate Clips
+            </button>
+          </div>
+        </header>
+
+        <section className="review-workspace-grid">
+          <div className="review-media-column">
+            <section className="review-video-card">
+              {selectedMatch.match.videoLocalPath ? (
+                <video
+                  className="review-video"
+                  controls
+                  src={toLocalFileSource(selectedMatch.match.videoLocalPath)}
+                />
+              ) : selectedMatch.match.thumbnailPath ? (
+                <img
+                  alt="Match thumbnail"
+                  className="review-video-image"
+                  src={toLocalFileSource(selectedMatch.match.thumbnailPath)}
+                />
+              ) : (
+                <div className="video-placeholder">
+                  <Glyph name="camera" />
+                  <strong>No local video linked yet.</strong>
+                  <span>Link a local recording and this workstation turns into the main replay review surface.</span>
+                </div>
+              )}
+            </section>
+            <TimelineMarkerRail
+              durationSeconds={selectedMatch.match.durationSeconds}
+              markers={selectedMatch.timelineMarkers}
+            />
+          </div>
+
+          <aside className="review-summary-column">
+            <article className="summary-card">
+              <div className="summary-card-topline">
+                <strong>Match status</strong>
+                <span className={`tone-chip tone-${resultTone(selectedMatch.match.resultForPlayer)}`}>
+                  {selectedMatch.match.resultForPlayer ?? "Pending"}
+                </span>
+              </div>
+              <div className="summary-list">
+                <span>{selectedMatch.timelineMarkers.length} timeline markers</span>
+                <span>{selectedMatch.insights.length} structured insights</span>
+                <span>{selectedMatch.validationTargets.length} validation targets</span>
+                <span>{selectedMatch.videoClips.length} generated clips</span>
+              </div>
+            </article>
+
+            <article className="summary-card">
+              <div className="summary-card-topline">
+                <strong>Spec snapshot</strong>
+                <span className="tone-chip tone-stone">
+                  {selectedMatch.specPerformanceSnapshot?.specLabel ?? "Inferred profile"}
+                </span>
+              </div>
+              <SnapshotRail snapshot={selectedMatch.specPerformanceSnapshot} />
+            </article>
+
+            {selectedMatch.metricSummary ? (
+              <article className="summary-card">
+                <div className="summary-card-topline">
+                  <strong>Match metrics</strong>
+                  <span className="tone-chip tone-stone">Details++ seed</span>
+                </div>
+                <div className="metric-mini-grid">
+                  <article className="mini-stat-card">
+                    <span>Total casts</span>
+                    <strong>{formatLargeNumber(selectedMatch.metricSummary.totalCasts)}</strong>
+                  </article>
+                  <article className="mini-stat-card">
+                    <span>DPS</span>
+                    <strong>{selectedMatch.metricSummary.damagePerSecond}</strong>
+                  </article>
+                  <article className="mini-stat-card">
+                    <span>HPS</span>
+                    <strong>{selectedMatch.metricSummary.healingPerSecond}</strong>
+                  </article>
+                  <article className="mini-stat-card">
+                    <span>Casts/min</span>
+                    <strong>{selectedMatch.metricSummary.castsPerMinute}</strong>
+                  </article>
+                </div>
+              </article>
+            ) : null}
+          </aside>
+        </section>
+
+        <div className="tab-strip review-tabs">
+          {reviewTabs.map((tab) => (
+            <button
+              key={tab.key}
+              className={`tab-button ${activeReviewTab === tab.key ? "active" : ""}`}
+              onClick={() => setActiveReviewTab(tab.key)}
+              type="button"
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {activeReviewTab === "overview" ? (
+          <div className="content-grid two-column">
+            <div className="stack-card">
+              <div className="section-header">
+                <h2>Structured insights</h2>
+                <span>{selectedMatch.insights.length}</span>
+              </div>
+              <div className="intel-grid two-up">
+                {selectedMatch.insights.length === 0 ? (
+                  <p className="muted-copy">No imported insights yet.</p>
+                ) : (
+                  selectedMatch.insights.map((insight) => (
+                    <article
+                      key={`${insight.source}-${insight.videoSecond}-${insight.title}`}
+                      className="intel-card"
+                    >
+                      <div className="intel-card-topline">
+                        <strong>{insight.title}</strong>
+                        <span className={`tone-chip tone-${categoryTone(insight.category)}`}>
+                          {titleize(insight.category)}
+                        </span>
+                      </div>
+                      <p>{insight.summary}</p>
+                      {insight.recommendation ? <p className="muted-copy">{insight.recommendation}</p> : null}
+                    </article>
+                  ))
+                )}
+              </div>
+            </div>
+            <div className="stack-card">
+              <div className="section-header">
+                <h2>Validation targets</h2>
+                <span>{selectedMatch.validationTargets.length}</span>
+              </div>
+              <div className="intel-grid two-up">
+                {selectedMatch.validationTargets.length === 0 ? (
+                  <p className="muted-copy">No validation targets imported yet.</p>
+                ) : (
+                  selectedMatch.validationTargets.map((target) => (
+                    <article
+                      key={`${target.source}-${target.videoSecond}-${target.metric}`}
+                      className="intel-card"
+                    >
+                      <div className="intel-card-topline">
+                        <strong>{target.metric}</strong>
+                        <span className={`tone-chip tone-${categoryTone(target.category)}`}>
+                          {titleize(target.category)}
+                        </span>
+                      </div>
+                      <p>
+                        {target.currentValue ?? "unknown"} {"->"} {target.expectedValue ?? "target"}
+                        {target.unit ? ` (${target.unit})` : ""}
+                      </p>
+                      {target.note ? <p className="muted-copy">{target.note}</p> : null}
+                    </article>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {activeReviewTab === "details" ? (
+          <div className="stack-card">
+            <div className="section-header">
+              <h2>Spell intelligence</h2>
+              <span>{categorizedSpells.length} tracked spells</span>
+            </div>
+            <div className="intel-grid three-up">
+              {categorizedSpells.length === 0 ? (
+                <p className="muted-copy">No spell metrics persisted yet.</p>
+              ) : (
+                categorizedSpells.map((metric) => (
+                  <SpellMetricCard key={`${metric.normalizedSpellName}-${metric.specLabel ?? "unknown"}`} metric={metric} />
                 ))
               )}
             </div>
-          </Panel>
-        </aside>
+          </div>
+        ) : null}
 
-        <section className="review-column">
-          <Panel
-            title="Review Stage"
-            eyebrow={selectedMatch?.match.matchId ?? "Select a match"}
-            actions={
-              <div className="button-row">
-                <button
-                  onClick={handleAttachVideo}
-                  disabled={isBusy || !selectedMatch}
-                  type="button"
-                >
-                  Attach Video
-                </button>
-                <button
-                  onClick={handleExportPrompt}
-                  disabled={isBusy || !selectedMatch}
-                  type="button"
-                >
-                  Export Prompt
-                </button>
-                <button
-                  onClick={handleProcessVideo}
-                  disabled={isBusy || !selectedMatch?.match.videoLocalPath}
-                  type="button"
-                >
-                  Process Video
-                </button>
-                <button
-                  onClick={handleGenerateReviewClips}
-                  disabled={isBusy || !selectedMatch?.match.videoLocalPath}
-                  type="button"
-                >
-                  Generate Clips
-                </button>
+        {activeReviewTab === "coach" ? (
+          <div className="content-grid two-column">
+            <div className="stack-card">
+              <div className="section-header">
+                <h2>Local rule coach</h2>
+                <span>{selectedMatch.ruleCoachFindings.length}</span>
               </div>
-            }
-          >
-            {selectedMatch ? (
-              <>
-                <section className="review-banner">
-                  <div className="review-banner-copy">
-                    <p className="panel-eyebrow">Active match</p>
-                    <h3>
-                      {selectedMatch.match.playerName ?? "Unknown player"} ·{" "}
-                      {selectedMatch.match.playerClassName ?? "Unknown class"}
-                      {selectedMatch.match.playerSpecLabel ? ` / ${selectedMatch.match.playerSpecLabel}` : ""}
-                    </h3>
-                    <p className="muted-copy">
-                      {selectedMatch.match.mapName} · {selectedMatch.match.bracket} ·{" "}
-                      {formatDuration(selectedMatch.match.durationSeconds)}
-                    </p>
-                  </div>
-                  <div className="review-badges">
-                    <span className="review-topline-chip">{selectedMatch.match.resultForPlayer ?? "result pending"}</span>
-                    <span className="review-topline-chip">{selectedMatch.match.recordingStatus ?? "recording status unknown"}</span>
-                    {selectedMatch.match.videoResolution ? (
-                      <span className="review-topline-chip">{selectedMatch.match.videoResolution}</span>
-                    ) : null}
-                    <span className="review-topline-chip">{selectedMatch.timelineMarkers.length} markers</span>
-                  </div>
-                </section>
-
-                <div className="review-stage-grid">
-                  <div className="media-stage">
-                    {selectedMatch.match.thumbnailPath ? (
-                      <img
-                        alt="Match thumbnail"
-                        className="video-thumbnail"
-                        src={toLocalFileSource(selectedMatch.match.thumbnailPath)}
-                      />
-                    ) : null}
-
-                    <div className="video-shell">
-                      {selectedMatch.match.videoLocalPath ? (
-                        <video
-                          controls
-                          className="video-player"
-                          src={toLocalFileSource(selectedMatch.match.videoLocalPath)}
-                        />
-                      ) : (
-                        <div className="video-placeholder">
-                          <Glyph name="camera" />
-                          <strong>No local video linked yet.</strong>
-                          <span>
-                            Link a recording file now. Timeline markers, coach notes, and
-                            validation targets will still land in the review stage.
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="coach-stage">
-                    <div className="coach-stage-card">
-                      <div className="intel-card-topline">
-                        <strong>Spec snapshot</strong>
-                        <span className="tone-chip tone-stone">
-                          {selectedMatch.specPerformanceSnapshot?.className ?? "Unknown"}
-                        </span>
-                      </div>
-                      <p className="muted-copy">
-                        Class/spec inference is built from spell usage and `WoWInfo`, then
-                        reused by metrics and coach memory.
-                      </p>
-                      <SnapshotRail snapshot={selectedMatch.specPerformanceSnapshot} />
-                    </div>
-
-                    {selectedMatch.metricSummary ? (
-                      <div className="coach-stage-card metric-summary-grid">
-                        <article>
-                          <span>Total casts</span>
-                          <strong>{formatLargeNumber(selectedMatch.metricSummary.totalCasts)}</strong>
-                        </article>
-                        <article>
-                          <span>Total damage</span>
-                          <strong>{formatLargeNumber(selectedMatch.metricSummary.totalDamage)}</strong>
-                        </article>
-                        <article>
-                          <span>Total healing</span>
-                          <strong>{formatLargeNumber(selectedMatch.metricSummary.totalHealing)}</strong>
-                        </article>
-                        <article>
-                          <span>DPS</span>
-                          <strong>{selectedMatch.metricSummary.damagePerSecond}</strong>
-                        </article>
-                        <article>
-                          <span>HPS</span>
-                          <strong>{selectedMatch.metricSummary.healingPerSecond}</strong>
-                        </article>
-                        <article>
-                          <span>Casts/min</span>
-                          <strong>{selectedMatch.metricSummary.castsPerMinute}</strong>
-                        </article>
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-
-                <TimelineMarkerRail
-                  durationSeconds={selectedMatch.match.durationSeconds}
-                  markers={selectedMatch.timelineMarkers}
-                />
-
-                <div className="intel-grid two-up">
-                  <label className="review-block">
-                    <span>Manual ChatGPT Prompt</span>
-                    <textarea readOnly value={promptText} />
-                  </label>
-
-                  <label className="review-block">
-                    <span>Paste ChatGPT Response</span>
-                    <textarea
-                      value={manualResponseText}
-                      onChange={(event) => setManualResponseText(event.target.value)}
+              <div className="intel-grid two-up">
+                {selectedMatch.ruleCoachFindings.length === 0 ? (
+                  <p className="muted-copy">No local rule coach findings yet.</p>
+                ) : (
+                  selectedMatch.ruleCoachFindings.map((item) => (
+                    <RuleCoachFindingCard
+                      key={`${item.scope}-${item.relatedMetric ?? item.title}-${item.title}`}
+                      item={item}
                     />
-                  </label>
-                </div>
-
-                <section className="section-heading">
-                  <div>
-                    <p className="panel-eyebrow">Local rule coach</p>
-                    <h3>Reusable findings from coach memory</h3>
-                  </div>
-                </section>
-                <div className="intel-grid two-up">
-                  {selectedMatch.ruleCoachFindings.length === 0 ? (
-                    <p className="muted-copy">
-                      No local rule-coach findings yet. Import more reviews to grow coach memory.
-                    </p>
-                  ) : (
-                    selectedMatch.ruleCoachFindings.map((item) => (
-                      <RuleCoachFindingCard
-                        key={`${item.scope}-${item.relatedMetric ?? item.title}-${item.title}`}
-                        item={item}
-                      />
-                    ))
-                  )}
-                </div>
-
-                <section className="section-heading">
-                  <div>
-                    <p className="panel-eyebrow">Benchmark audit</p>
-                    <h3>Match vs learned class/spec expectations</h3>
-                  </div>
-                </section>
-                <div className="intel-grid three-up">
-                  {selectedMatch.benchmarkComparisons.length === 0 ? (
-                    <p className="muted-copy">
-                      No benchmark comparisons yet. This fills in as validation targets and coach knowledge grow.
-                    </p>
-                  ) : (
-                    selectedMatch.benchmarkComparisons.map((item) => (
-                      <BenchmarkComparisonCard
-                        key={`${item.scope}-${item.metric}-${item.category}`}
-                        item={item}
-                      />
-                    ))
-                  )}
-                </div>
-
-                <section className="section-heading">
-                  <div>
-                    <p className="panel-eyebrow">Spell intelligence</p>
-                    <h3>Class/spec-enriched breakdown</h3>
-                  </div>
-                </section>
-                <div className="intel-grid three-up">
-                  {categorizedSpells.length === 0 ? (
-                    <p className="muted-copy">No spell metrics persisted yet.</p>
-                  ) : (
-                    categorizedSpells.map((metric) => (
-                      <SpellMetricCard key={`${metric.normalizedSpellName}-${metric.specLabel ?? "unknown"}`} metric={metric} />
-                    ))
-                  )}
-                </div>
-
-                <section className="section-heading">
-                  <div>
-                    <p className="panel-eyebrow">Coach memory</p>
-                    <h3>Knowledge, skills, clips, and audit targets</h3>
-                  </div>
-                </section>
-
-                <div className="intel-grid two-up">
-                  <div className="review-block review-list-block">
-                    <span>Coach Knowledge</span>
-                    {selectedMatch.coachKnowledgeParameters.length === 0 ? (
-                      <p className="muted-copy">No accumulated coach parameters yet.</p>
-                    ) : (
-                      selectedMatch.coachKnowledgeParameters.map((item) => (
-                        <KnowledgeCard
-                          key={`${item.scope}-${item.className ?? "none"}-${item.specLabel ?? "none"}-${item.metric}`}
-                          item={item}
-                        />
-                      ))
-                    )}
-                  </div>
-
-                  <div className="review-block review-list-block">
-                    <span>Coach Skills</span>
-                    {selectedMatch.coachSkills.length === 0 ? (
-                      <p className="muted-copy">No accumulated coach skills yet.</p>
-                    ) : (
-                      selectedMatch.coachSkills.map((item) => (
-                        <SkillCard
-                          key={`${item.scope}-${item.className ?? "none"}-${item.specLabel ?? "none"}-${item.area}-${item.goal}`}
-                          item={item}
-                        />
-                      ))
-                    )}
-                  </div>
-
-                  <div className="review-block review-list-block">
-                    <span>Review Clips</span>
-                    {selectedMatch.videoClips.length === 0 ? (
-                      <p className="muted-copy">
-                        No clips generated yet. Process the video and generate clips from markers,
-                        insights, and validation targets.
-                      </p>
-                    ) : (
-                      <div className="clip-grid">
-                        {selectedMatch.videoClips.map((clip) => (
-                          <article
-                            key={`${clip.source}-${clip.videoSecond}-${clip.label}`}
-                            className="clip-card"
-                          >
-                            <strong>{clip.label}</strong>
-                            <p>
-                              {formatDuration(clip.startSecond)} to {formatDuration(clip.endSecond)} ·{" "}
-                              {clip.category}
-                            </p>
-                            <video
-                              controls
-                              className="clip-player"
-                              src={toLocalFileSource(clip.clipPath)}
-                            />
-                          </article>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="review-block review-list-block">
-                    <span>Structured Insights</span>
-                    {selectedMatch.insights.length === 0 ? (
-                      <p className="muted-copy">No structured insights imported yet.</p>
-                    ) : (
-                      selectedMatch.insights.map((insight) => (
-                        <article
-                          key={`${insight.source}-${insight.videoSecond}-${insight.title}`}
-                          className="intel-card"
-                        >
-                          <div className="intel-card-topline">
-                            <strong>{insight.title}</strong>
-                            <span className={`tone-chip tone-${categoryTone(insight.category)}`}>
-                              {titleize(insight.category)}
-                            </span>
-                          </div>
-                          <p>{insight.summary}</p>
-                          {insight.recommendation ? <p className="muted-copy">{insight.recommendation}</p> : null}
-                        </article>
-                      ))
-                    )}
-                  </div>
-
-                  <div className="review-block review-list-block full-span">
-                    <span>Validation Targets</span>
-                    {selectedMatch.validationTargets.length === 0 ? (
-                      <p className="muted-copy">No validation targets imported yet.</p>
-                    ) : (
-                      <div className="intel-grid two-up">
-                        {selectedMatch.validationTargets.map((target) => (
-                          <article
-                            key={`${target.source}-${target.videoSecond}-${target.metric}`}
-                            className="intel-card"
-                          >
-                            <div className="intel-card-topline">
-                              <strong>{target.metric}</strong>
-                              <span className={`tone-chip tone-${categoryTone(target.category)}`}>
-                                {titleize(target.category)}
-                              </span>
-                            </div>
-                            <p>
-                              {target.currentValue ?? "unknown"} → {target.expectedValue ?? "target"}
-                              {target.unit ? ` (${target.unit})` : ""}
-                            </p>
-                            {target.note ? <p className="muted-copy">{target.note}</p> : null}
-                          </article>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="button-row import-analysis-row">
-                  <button
-                    onClick={handleImportManualAnalysis}
-                    disabled={isBusy || !manualResponseText.trim()}
-                    type="button"
-                  >
-                    Import Manual Analysis
-                  </button>
-                </div>
-
-                <label className="review-block raw-json">
-                  <span>Match JSON</span>
-                  <textarea readOnly value={selectedMatch.matchJson} />
-                </label>
-              </>
-            ) : (
-              <div className="empty-stage">
-                <Glyph name="radar" />
-                <strong>Select or import a match to open the review workspace.</strong>
+                  ))
+                )}
               </div>
-            )}
-          </Panel>
-        </section>
+            </div>
+            <div className="stack-card">
+              <div className="section-header">
+                <h2>Benchmark audit</h2>
+                <span>{selectedMatch.benchmarkComparisons.length}</span>
+              </div>
+              <div className="intel-grid two-up">
+                {selectedMatch.benchmarkComparisons.length === 0 ? (
+                  <p className="muted-copy">No benchmark comparisons yet.</p>
+                ) : (
+                  selectedMatch.benchmarkComparisons.map((item) => (
+                    <BenchmarkComparisonCard
+                      key={`${item.scope}-${item.metric}-${item.category}`}
+                      item={item}
+                    />
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {activeReviewTab === "learning" ? (
+          <div className="content-grid two-column">
+            <div className="stack-card">
+              <div className="section-header">
+                <h2>Coach knowledge</h2>
+                <span>{selectedMatch.coachKnowledgeParameters.length}</span>
+              </div>
+              <div className="intel-grid two-up">
+                {selectedMatch.coachKnowledgeParameters.length === 0 ? (
+                  <p className="muted-copy">No accumulated knowledge parameters yet.</p>
+                ) : (
+                  selectedMatch.coachKnowledgeParameters.map((item) => (
+                    <KnowledgeCard
+                      key={`${item.scope}-${item.className ?? "none"}-${item.specLabel ?? "none"}-${item.metric}`}
+                      item={item}
+                    />
+                  ))
+                )}
+              </div>
+            </div>
+            <div className="stack-card">
+              <div className="section-header">
+                <h2>Coach skills</h2>
+                <span>{selectedMatch.coachSkills.length}</span>
+              </div>
+              <div className="intel-grid two-up">
+                {selectedMatch.coachSkills.length === 0 ? (
+                  <p className="muted-copy">No accumulated coach skills yet.</p>
+                ) : (
+                  selectedMatch.coachSkills.map((item) => (
+                    <SkillCard
+                      key={`${item.scope}-${item.className ?? "none"}-${item.specLabel ?? "none"}-${item.area}-${item.goal}`}
+                      item={item}
+                    />
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {activeReviewTab === "chatgpt" ? (
+          <div className="content-grid two-column">
+            <label className="editor-card">
+              <span>Manual ChatGPT Prompt</span>
+              <textarea readOnly value={promptText} />
+            </label>
+            <label className="editor-card">
+              <span>Paste ChatGPT Response</span>
+              <textarea
+                value={manualResponseText}
+                onChange={(event) => setManualResponseText(event.target.value)}
+              />
+            </label>
+            <div className="action-card full-span">
+              <div className="page-actions">
+                <button onClick={handleExportPrompt} disabled={isBusy} type="button">
+                  Export Prompt for ChatGPT
+                </button>
+                <button
+                  onClick={handleImportManualAnalysis}
+                  disabled={isBusy || !manualResponseText.trim()}
+                  type="button"
+                >
+                  Import ChatGPT Response
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {activeReviewTab === "json" ? (
+          <label className="editor-card full-height-card">
+            <span>Match JSON</span>
+            <textarea readOnly value={selectedMatch.matchJson} />
+          </label>
+        ) : null}
+      </div>
+    );
+  }
+
+  function renderClipsScreen() {
+    return (
+      <div className="workspace-page">
+        <header className="page-header">
+          <div>
+            <p className="eyebrow">Clips</p>
+            <h1>Generated replay clips</h1>
+            <p className="page-copy">
+              Quick access to generated review cuts from local timeline markers, imported insights, and validation targets.
+            </p>
+          </div>
+          <div className="page-actions">
+            <button onClick={handleGenerateReviewClips} disabled={isBusy || !selectedMatchId} type="button">
+              Generate from selected match
+            </button>
+          </div>
+        </header>
+        <div className="clip-grid">
+          {selectedMatch?.videoClips.length ? (
+            selectedMatch.videoClips.map((clip) => (
+              <article key={`${clip.source}-${clip.videoSecond}-${clip.label}`} className="clip-card">
+                <strong>{clip.label}</strong>
+                <p>
+                  {formatDuration(clip.startSecond)} to {formatDuration(clip.endSecond)} / {clip.category}
+                </p>
+                <video controls className="clip-player" src={toLocalFileSource(clip.clipPath)} />
+              </article>
+            ))
+          ) : (
+            <div className="empty-state-card">
+              <Glyph name="clips" />
+              <strong>No clips generated yet.</strong>
+              <p>Process a selected match video and generate clips from markers, insights, and validation targets.</p>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  function renderVerifyScreen() {
+    return (
+      <div className="workspace-page narrow-page">
+        <header className="page-header">
+          <div>
+            <p className="eyebrow">Verify Setup</p>
+            <h1>Local diagnostics</h1>
+            <p className="page-copy">
+              Keep WoW detection, addon health, backend readiness, and OBS connectivity in one operational panel.
+            </p>
+          </div>
+          <div className="page-actions">
+            <button onClick={handleValidateSettings} disabled={isBusy} type="button">
+              Validate
+            </button>
+            <button onClick={handleTestObsConnection} disabled={isBusy} type="button">
+              Test OBS
+            </button>
+          </div>
+        </header>
+        <div className="verification-grid">
+          <article className="summary-card">
+            <div className="summary-card-topline">
+              <strong>Backend</strong>
+              <span className="tone-chip tone-success">Online</span>
+            </div>
+            <p>{systemStatus?.status ?? "Waiting for backend"}</p>
+          </article>
+          <article className="summary-card">
+            <div className="summary-card-topline">
+              <strong>WoW detection</strong>
+              <span className={`tone-chip tone-${settings.wowRetailPath ? "success" : "warning"}`}>
+                {settings.wowRetailPath ? "Detected" : "Missing"}
+              </span>
+            </div>
+            <p>{settings.wowRetailPath ?? "No WoW install configured yet."}</p>
+          </article>
+          <article className="summary-card">
+            <div className="summary-card-topline">
+              <strong>OBS</strong>
+              <span className={`tone-chip tone-${obsStatus?.isReachable ? "success" : "warning"}`}>
+                {obsStatus?.isReachable ? "Connected" : "Pending"}
+              </span>
+            </div>
+            <p>{obsStatus?.errorMessage ?? obsStatus?.outputPath ?? "Connection test pending."}</p>
+          </article>
+        </div>
+        {validation ? (
+          <div className={`validation-shell ${validation.isValid ? "valid" : "invalid"}`}>
+            <strong>{validation.isValid ? "Setup healthy" : "Setup needs attention"}</strong>
+            <ul>
+              {validation.messages.length === 0 ? (
+                <li>Everything looks ready for local review.</li>
+              ) : (
+                validation.messages.map((message) => <li key={message}>{message}</li>)
+              )}
+            </ul>
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  function renderContent() {
+    if (isLibraryView(activeView)) {
+      return renderLibraryScreen();
+    }
+
+    switch (activeView) {
+      case "review":
+        return renderReviewScreen();
+      case "clips":
+        return renderClipsScreen();
+      case "settings":
+        return renderSettingsScreen();
+      case "scene":
+        return renderSceneScreen();
+      case "verify":
+        return renderVerifyScreen();
+      default:
+        return renderLibraryScreen();
+    }
+  }
+
+  return (
+    <main className="desktop-shell">
+      <aside className="desktop-sidebar">
+        <div className="sidebar-brand">
+          <div className="brand-mark">AG</div>
+          <div>
+            <strong>ArenaGodEyes</strong>
+            <span>Desktop Coach</span>
+          </div>
+        </div>
+
+        <nav className="sidebar-nav">
+          {librarySidebarItems.map((item) => (
+            <button
+              key={item.key}
+              className={`sidebar-item ${activeView === item.key ? "active" : ""}`}
+              onClick={() => handleSidebarNavigation(item.key)}
+              type="button"
+            >
+              <Glyph name={item.icon} />
+              <span>{item.label}</span>
+            </button>
+          ))}
+        </nav>
+
+        <div className="sidebar-divider" />
+
+        <nav className="sidebar-nav secondary">
+          {systemSidebarItems.map((item) => (
+            <button
+              key={item.key}
+              className={`sidebar-item ${
+                activeView === item.key ||
+                (activeView === "review" &&
+                  ((item.key === "details" && activeReviewTab === "details") ||
+                    (item.key === "coach" && activeReviewTab === "coach") ||
+                    (item.key === "learning" && activeReviewTab === "learning")))
+                  ? "active"
+                  : ""
+              }`}
+              onClick={() => handleSidebarNavigation(item.key)}
+              type="button"
+            >
+              <Glyph name={item.icon} />
+              <span>{item.label}</span>
+            </button>
+          ))}
+        </nav>
+
+        <div className="sidebar-footer">
+          <span>{systemStatus?.version ?? "v0.0.0"}</span>
+          <span>{obsStatus?.isReachable ? "OBS connected" : "OBS pending"}</span>
+        </div>
+      </aside>
+
+      <section className="desktop-main">
+        <header className="desktop-topbar">
+          <div className="topbar-status-cluster">
+            <span className="topbar-pill">
+              <i className={`status-dot ${isBusy ? "busy" : "ready"}`} />
+              {isBusy ? "Processing" : systemStatus?.status ?? "Ready"}
+            </span>
+            <span className="topbar-pill">
+              <i className={`status-dot ${settings.enableMatchDetection ? "ready" : "idle"}`} />
+              {settings.enableMatchDetection ? "Detection active" : "Detection paused"}
+            </span>
+            <span className="topbar-pill">
+              <i className={`status-dot ${obsStatus?.isRecording ? "recording" : "idle"}`} />
+              {obsStatus?.isRecording ? "Recording" : "Recorder idle"}
+            </span>
+            <span className="topbar-pill">
+              <i className={`status-dot ${settings.wowRetailPath ? "ready" : "idle"}`} />
+              {settings.wowRetailPath ? "WoW detected" : "WoW not configured"}
+            </span>
+          </div>
+          <div className="topbar-meta">
+            <span>{pendingAnalyses} pending analyses</span>
+            <span>{statusMessage}</span>
+          </div>
+        </header>
+
+        <div className="desktop-content">{renderContent()}</div>
       </section>
     </main>
   );
