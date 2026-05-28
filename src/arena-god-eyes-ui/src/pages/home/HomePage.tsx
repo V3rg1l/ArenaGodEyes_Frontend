@@ -4,12 +4,14 @@ import { Panel } from "../../shared/components/Panel";
 import { TimelineMarkerRail } from "../../shared/components/TimelineMarkerRail";
 import type {
   AppSettings,
+  MatchBenchmarkComparisonItem,
   CoachKnowledgeParameterItem,
   CoachSkillItem,
   MatchLibraryItem,
   MatchReviewDetails,
   MatchSpellMetricItem,
   ObsConnectionStatus,
+  RuleCoachFindingItem,
   SettingsValidationResult,
   SpecPerformanceSnapshotItem,
   SystemStatus,
@@ -134,6 +136,18 @@ function categoryTone(category: string | null) {
     case "damage":
     case "dot":
       return "ember";
+    default:
+      return "stone";
+  }
+}
+
+function comparisonTone(status: string) {
+  switch (status) {
+    case "aligned":
+      return "growth";
+    case "below_target":
+    case "above_target":
+      return "blood";
     default:
       return "stone";
   }
@@ -279,6 +293,47 @@ function SkillCard({ item }: { item: CoachSkillItem }) {
       <p>{item.goal}</p>
       <p className="muted-copy">evidence {item.evidenceCount}</p>
       {item.drill ? <p>{item.drill}</p> : null}
+    </article>
+  );
+}
+
+function BenchmarkComparisonCard({ item }: { item: MatchBenchmarkComparisonItem }) {
+  return (
+    <article className="intel-card">
+      <div className="intel-card-topline">
+        <strong>{titleize(item.metric)}</strong>
+        <span className={`tone-chip tone-${comparisonTone(item.status)}`}>
+          {titleize(item.status)}
+        </span>
+      </div>
+      <p className="muted-copy">
+        {scopeLabel(item)} · {titleize(item.category)} · evidence {item.evidenceCount}
+      </p>
+      <p>
+        {item.currentValue ?? "unknown"} → {item.expectedValue ?? "target"}
+        {item.unit ? ` (${item.unit})` : ""}
+      </p>
+      {item.note ? <p className="muted-copy">{item.note}</p> : null}
+    </article>
+  );
+}
+
+function RuleCoachFindingCard({ item }: { item: RuleCoachFindingItem }) {
+  return (
+    <article className="intel-card">
+      <div className="intel-card-topline">
+        <strong>{item.title}</strong>
+        <span className={`tone-chip tone-${comparisonTone(item.severity === "high" ? "below_target" : "needs_review")}`}>
+          {titleize(item.severity)}
+        </span>
+      </div>
+      <p className="muted-copy">
+        {item.scope} · {titleize(item.category)}
+        {item.relatedMetric ? ` · ${titleize(item.relatedMetric)}` : ""}
+      </p>
+      <p>{item.summary}</p>
+      <p className="muted-copy">{item.evidence}</p>
+      <p>{item.recommendation}</p>
     </article>
   );
 }
@@ -1110,6 +1165,48 @@ export function HomePage() {
                       onChange={(event) => setManualResponseText(event.target.value)}
                     />
                   </label>
+                </div>
+
+                <section className="section-heading">
+                  <div>
+                    <p className="panel-eyebrow">Local rule coach</p>
+                    <h3>Reusable findings from coach memory</h3>
+                  </div>
+                </section>
+                <div className="intel-grid two-up">
+                  {selectedMatch.ruleCoachFindings.length === 0 ? (
+                    <p className="muted-copy">
+                      No local rule-coach findings yet. Import more reviews to grow coach memory.
+                    </p>
+                  ) : (
+                    selectedMatch.ruleCoachFindings.map((item) => (
+                      <RuleCoachFindingCard
+                        key={`${item.scope}-${item.relatedMetric ?? item.title}-${item.title}`}
+                        item={item}
+                      />
+                    ))
+                  )}
+                </div>
+
+                <section className="section-heading">
+                  <div>
+                    <p className="panel-eyebrow">Benchmark audit</p>
+                    <h3>Match vs learned class/spec expectations</h3>
+                  </div>
+                </section>
+                <div className="intel-grid three-up">
+                  {selectedMatch.benchmarkComparisons.length === 0 ? (
+                    <p className="muted-copy">
+                      No benchmark comparisons yet. This fills in as validation targets and coach knowledge grow.
+                    </p>
+                  ) : (
+                    selectedMatch.benchmarkComparisons.map((item) => (
+                      <BenchmarkComparisonCard
+                        key={`${item.scope}-${item.metric}-${item.category}`}
+                        item={item}
+                      />
+                    ))
+                  )}
                 </div>
 
                 <section className="section-heading">

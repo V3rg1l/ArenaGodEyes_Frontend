@@ -77,6 +77,8 @@ export type MatchReviewDetails = {
   spellMetrics: MatchSpellMetricItem[];
   coachKnowledgeParameters: CoachKnowledgeParameterItem[];
   coachSkills: CoachSkillItem[];
+  benchmarkComparisons: MatchBenchmarkComparisonItem[];
+  ruleCoachFindings: RuleCoachFindingItem[];
   timelineMarkers: TimelineMarkerItem[];
   insights: AnalysisInsightItem[];
   validationTargets: ValidationTargetItem[];
@@ -165,6 +167,32 @@ export type ValidationTargetItem = {
   unit: string | null;
   note: string | null;
   source: string;
+};
+
+export type MatchBenchmarkComparisonItem = {
+  scope: string;
+  className: string | null;
+  specLabel: string | null;
+  category: string;
+  metric: string;
+  currentValue: string | null;
+  expectedValue: string | null;
+  unit: string | null;
+  status: string;
+  note: string | null;
+  source: string;
+  evidenceCount: number;
+};
+
+export type RuleCoachFindingItem = {
+  title: string;
+  category: string;
+  severity: string;
+  scope: string;
+  summary: string;
+  recommendation: string;
+  evidence: string;
+  relatedMetric: string | null;
 };
 
 export type ImportedMatchSummary = {
