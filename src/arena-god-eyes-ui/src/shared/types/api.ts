@@ -10,6 +10,10 @@ export type AppSettings = {
   obsPassword: string | null;
   enableObsRecording: boolean;
   enableObsAutoConnect: boolean;
+  obsConnectTimeoutSeconds: number;
+  ffmpegExecutablePath: string | null;
+  ffprobeExecutablePath: string | null;
+  videoThumbnailSecond: number;
   maxDiskStorageGb: number;
   maxMatchFiles: number;
   trackSkirmishMatches: boolean;
@@ -47,6 +51,10 @@ export type MatchLibraryItem = {
   timelineMarkerCount: number;
   matchJsonPath: string;
   videoLocalPath: string | null;
+  thumbnailPath: string | null;
+  recordingStatus: string | null;
+  videoDurationSeconds: number | null;
+  videoResolution: string | null;
 };
 
 export type TimelineMarkerItem = {
@@ -63,7 +71,78 @@ export type MatchReviewDetails = {
   matchJson: string;
   promptText: string | null;
   manualAnalysisText: string | null;
+  metricSummary: MatchMetricSummaryItem | null;
+  spellMetrics: MatchSpellMetricItem[];
+  coachKnowledgeParameters: CoachKnowledgeParameterItem[];
+  coachSkills: CoachSkillItem[];
   timelineMarkers: TimelineMarkerItem[];
+  insights: AnalysisInsightItem[];
+  validationTargets: ValidationTargetItem[];
+  videoClips: VideoClipItem[];
+};
+
+export type MatchMetricSummaryItem = {
+  totalCasts: number;
+  totalDamage: number;
+  totalHealing: number;
+  interruptCount: number;
+  deathCount: number;
+  damagePerSecond: number;
+  healingPerSecond: number;
+  castsPerMinute: number;
+};
+
+export type MatchSpellMetricItem = {
+  spellName: string;
+  castCount: number;
+  totalDamage: number;
+  totalHealing: number;
+};
+
+export type CoachKnowledgeParameterItem = {
+  scope: string;
+  specLabel: string | null;
+  category: string;
+  metric: string;
+  targetValue: string | null;
+  unit: string | null;
+  note: string | null;
+  source: string;
+  evidenceCount: number;
+  updatedAt: string;
+};
+
+export type CoachSkillItem = {
+  scope: string;
+  specLabel: string | null;
+  area: string;
+  goal: string;
+  drill: string | null;
+  source: string;
+  evidenceCount: number;
+  updatedAt: string;
+};
+
+export type AnalysisInsightItem = {
+  videoSecond: number | null;
+  category: string;
+  severity: string;
+  title: string;
+  summary: string;
+  evidence: string | null;
+  recommendation: string | null;
+  source: string;
+};
+
+export type ValidationTargetItem = {
+  videoSecond: number | null;
+  category: string;
+  metric: string;
+  currentValue: string | null;
+  expectedValue: string | null;
+  unit: string | null;
+  note: string | null;
+  source: string;
 };
 
 export type ImportedMatchSummary = {
@@ -104,4 +183,59 @@ export type SystemStatus = {
   status: string;
   safety: string;
   utcNow: string;
+};
+
+export type ObsConnectionStatus = {
+  isConfigured: boolean;
+  isReachable: boolean;
+  isAuthenticated: boolean;
+  isRecording: boolean;
+  obsVersion: string | null;
+  outputPath: string | null;
+  errorMessage: string | null;
+};
+
+export type ObsRecordingStartResult = {
+  started: boolean;
+  wasAlreadyRecording: boolean;
+  matchId: string | null;
+  message: string | null;
+};
+
+export type ObsRecordingStopResult = {
+  stopped: boolean;
+  matchId: string | null;
+  outputPath: string | null;
+  finalVideoPath: string | null;
+  attachedToMatch: boolean;
+  message: string | null;
+};
+
+export type VideoProcessingResult = {
+  matchId: string;
+  videoPath: string;
+  thumbnailPath: string | null;
+  durationSeconds: number | null;
+  fileSizeBytes: number | null;
+  framesPerSecond: number | null;
+  codec: string | null;
+  resolution: string | null;
+  processedAt: string;
+};
+
+export type VideoClipItem = {
+  videoSecond: number;
+  startSecond: number;
+  endSecond: number;
+  label: string;
+  category: string;
+  source: string;
+  clipPath: string;
+  createdAt: string;
+};
+
+export type VideoClipGenerationResult = {
+  matchId: string;
+  generatedClipCount: number;
+  clips: VideoClipItem[];
 };

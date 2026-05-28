@@ -6,6 +6,7 @@ import type {
   AppSettings,
   MatchLibraryItem,
   MatchReviewDetails,
+  ObsConnectionStatus,
   SettingsValidationResult,
   SystemStatus,
 } from "../../shared/types/api";
@@ -24,6 +25,10 @@ const emptySettings: AppSettings = {
   obsPassword: null,
   enableObsRecording: false,
   enableObsAutoConnect: true,
+  obsConnectTimeoutSeconds: 5,
+  ffmpegExecutablePath: null,
+  ffprobeExecutablePath: null,
+  videoThumbnailSecond: 5,
   maxDiskStorageGb: 100,
   maxMatchFiles: 1000,
   trackSkirmishMatches: true,
@@ -38,16 +43,16 @@ const emptySettings: AppSettings = {
   updatedAt: new Date().toISOString(),
 };
 
-function toVideoSource(videoPath: string | null) {
-  if (!videoPath) {
+function toLocalFileSource(path: string | null) {
+  if (!path) {
     return undefined;
   }
 
-  if (/^https?:\/\//i.test(videoPath) || /^file:\/\//i.test(videoPath)) {
-    return videoPath;
+  if (/^https?:\/\//i.test(path) || /^file:\/\//i.test(path)) {
+    return path;
   }
 
-  const normalized = videoPath.replace(/\\/g, "/");
+  const normalized = path.replace(/\\/g, "/");
   return `file:///${normalized}`;
 }
 
@@ -61,6 +66,7 @@ export function HomePage() {
   const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
   const [settings, setSettings] = useState<AppSettings>(emptySettings);
   const [validation, setValidation] = useState<SettingsValidationResult | null>(null);
+  const [obsStatus, setObsStatus] = useState<ObsConnectionStatus | null>(null);
   const [matches, setMatches] = useState<MatchLibraryItem[]>([]);
   const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null);
   const [selectedMatch, setSelectedMatch] = useState<MatchReviewDetails | null>(null);
@@ -94,6 +100,8 @@ export function HomePage() {
       setSettings(settingsResult);
       setMatches(matchesResult);
       setSelectedMatchId((current) => current ?? matchesResult[0]?.matchId ?? null);
+      const latestObsStatus = await api.getObsStatus();
+      setObsStatus(latestObsStatus);
       setStatusMessage("Backend online. Ready to import logs and review matches.");
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : "Failed to load dashboard.");
@@ -173,6 +181,63 @@ export function HomePage() {
     }
   }
 
+  async function handleRefreshObsStatus() {
+    setIsBusy(true);
+    try {
+      const result = await api.getObsStatus();
+      setObsStatus(result);
+      setStatusMessage(result.errorMessage ?? "OBS status refreshed.");
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : "Failed to load OBS status.");
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  async function handleTestObsConnection() {
+    setIsBusy(true);
+    try {
+      const result = await api.testObsConnection();
+      setObsStatus(result);
+      setStatusMessage(
+        result.isReachable
+          ? "OBS connection succeeded."
+          : result.errorMessage ?? "OBS connection failed.",
+      );
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : "Failed to test OBS.");
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  async function handleStartObsRecording() {
+    setIsBusy(true);
+    try {
+      const result = await api.startObsRecording(selectedMatchId);
+      await handleRefreshObsStatus();
+      setStatusMessage(result.message ?? "OBS recording started.");
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : "Failed to start OBS recording.");
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  async function handleStopObsRecording() {
+    setIsBusy(true);
+    try {
+      const result = await api.stopObsRecording(selectedMatchId);
+      await refreshMatches(selectedMatchId);
+      await handleRefreshObsStatus();
+      setStatusMessage(result.message ?? "OBS recording stopped.");
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : "Failed to stop OBS recording.");
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
   async function handleImportSample() {
     setIsBusy(true);
     try {
@@ -226,6 +291,41 @@ export function HomePage() {
       setStatusMessage("Video path linked to the selected match.");
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : "Failed to attach video.");
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  async function handleProcessVideo() {
+    if (!selectedMatchId) {
+      return;
+    }
+
+    setIsBusy(true);
+    try {
+      const result = await api.processMatchVideo(selectedMatchId);
+      await loadMatch(selectedMatchId);
+      await refreshMatches(selectedMatchId);
+      setStatusMessage(`Video processed. Resolution: ${result.resolution ?? "unknown"}.`);
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : "Failed to process video.");
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  async function handleGenerateReviewClips() {
+    if (!selectedMatchId) {
+      return;
+    }
+
+    setIsBusy(true);
+    try {
+      const result = await api.generateReviewClips(selectedMatchId);
+      await loadMatch(selectedMatchId);
+      setStatusMessage(`Generated ${result.generatedClipCount} review clip(s).`);
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : "Failed to generate review clips.");
     } finally {
       setIsBusy(false);
     }
@@ -394,6 +494,56 @@ export function HomePage() {
                   }
                 />
               </label>
+              <label>
+                <span>FFmpeg Path</span>
+                <input
+                  value={settings.ffmpegExecutablePath ?? ""}
+                  onChange={(event) =>
+                    setSettings((current) => ({
+                      ...current,
+                      ffmpegExecutablePath: event.target.value || null,
+                    }))
+                  }
+                />
+              </label>
+              <label>
+                <span>FFprobe Path</span>
+                <input
+                  value={settings.ffprobeExecutablePath ?? ""}
+                  onChange={(event) =>
+                    setSettings((current) => ({
+                      ...current,
+                      ffprobeExecutablePath: event.target.value || null,
+                    }))
+                  }
+                />
+              </label>
+              <label>
+                <span>OBS Timeout (s)</span>
+                <input
+                  type="number"
+                  value={settings.obsConnectTimeoutSeconds}
+                  onChange={(event) =>
+                    setSettings((current) => ({
+                      ...current,
+                      obsConnectTimeoutSeconds: Number(event.target.value) || 5,
+                    }))
+                  }
+                />
+              </label>
+              <label>
+                <span>Thumbnail Second</span>
+                <input
+                  type="number"
+                  value={settings.videoThumbnailSecond}
+                  onChange={(event) =>
+                    setSettings((current) => ({
+                      ...current,
+                      videoThumbnailSecond: Number(event.target.value) || 5,
+                    }))
+                  }
+                />
+              </label>
             </div>
 
             <div className="toggle-row">
@@ -421,9 +571,15 @@ export function HomePage() {
                   }
                   type="checkbox"
                 />
-                OBS recording
+                Auto OBS recording during detected matches
               </label>
             </div>
+
+            <p className="signal-message">
+              With match detection enabled, the watcher now starts OBS on arena
+              start, imports the match on arena end, and only stops OBS if this
+              app started the recording.
+            </p>
 
             <div className="button-row">
               <button onClick={handleSaveSettings} disabled={isBusy} type="button">
@@ -433,6 +589,31 @@ export function HomePage() {
                 Validate Setup
               </button>
             </div>
+
+            <div className="button-row">
+              <button onClick={handleTestObsConnection} disabled={isBusy} type="button">
+                Test OBS
+              </button>
+              <button onClick={handleStartObsRecording} disabled={isBusy} type="button">
+                Start OBS Recording
+              </button>
+              <button onClick={handleStopObsRecording} disabled={isBusy} type="button">
+                Stop OBS Recording
+              </button>
+            </div>
+
+            {obsStatus ? (
+              <div className="obs-status-shell">
+                <strong>
+                  OBS {obsStatus.isReachable ? "online" : "offline"}
+                </strong>
+                <p>
+                  Version: {obsStatus.obsVersion ?? "unknown"} · Recording:{" "}
+                  {obsStatus.isRecording ? "active" : "idle"}
+                </p>
+                <p>{obsStatus.outputPath ?? obsStatus.errorMessage ?? "No active OBS output path."}</p>
+              </div>
+            ) : null}
 
             {validation ? (
               <div className={`validation-shell ${validation.isValid ? "valid" : "invalid"}`}>
@@ -530,6 +711,20 @@ export function HomePage() {
                 >
                   Export Prompt
                 </button>
+                <button
+                  onClick={handleProcessVideo}
+                  disabled={isBusy || !selectedMatch?.match.videoLocalPath}
+                  type="button"
+                >
+                  Process Video
+                </button>
+                <button
+                  onClick={handleGenerateReviewClips}
+                  disabled={isBusy || !selectedMatch?.match.videoLocalPath}
+                  type="button"
+                >
+                  Generate Clips
+                </button>
               </div>
             }
           >
@@ -540,14 +735,26 @@ export function HomePage() {
                   <span>{selectedMatch.match.resultForPlayer ?? "result pending"}</span>
                   <span>{selectedMatch.match.mapName}</span>
                   <span>{formatDuration(selectedMatch.match.durationSeconds)}</span>
+                  <span>{selectedMatch.match.recordingStatus ?? "recording status unknown"}</span>
+                  {selectedMatch.match.videoResolution ? (
+                    <span>{selectedMatch.match.videoResolution}</span>
+                  ) : null}
                 </div>
+
+                {selectedMatch.match.thumbnailPath ? (
+                  <img
+                    alt="Match thumbnail"
+                    className="video-thumbnail"
+                    src={toLocalFileSource(selectedMatch.match.thumbnailPath)}
+                  />
+                ) : null}
 
                 <div className="video-shell">
                   {selectedMatch.match.videoLocalPath ? (
                     <video
                       controls
                       className="video-player"
-                      src={toVideoSource(selectedMatch.match.videoLocalPath)}
+                      src={toLocalFileSource(selectedMatch.match.videoLocalPath)}
                     />
                   ) : (
                     <div className="video-placeholder">
@@ -565,6 +772,35 @@ export function HomePage() {
                   markers={selectedMatch.timelineMarkers}
                 />
 
+                {selectedMatch.metricSummary ? (
+                  <section className="metric-band review-metric-band">
+                    <article>
+                      <span>Total casts</span>
+                      <strong>{selectedMatch.metricSummary.totalCasts}</strong>
+                    </article>
+                    <article>
+                      <span>Total damage</span>
+                      <strong>{selectedMatch.metricSummary.totalDamage}</strong>
+                    </article>
+                    <article>
+                      <span>Total healing</span>
+                      <strong>{selectedMatch.metricSummary.totalHealing}</strong>
+                    </article>
+                    <article>
+                      <span>DPS</span>
+                      <strong>{selectedMatch.metricSummary.damagePerSecond}</strong>
+                    </article>
+                    <article>
+                      <span>HPS</span>
+                      <strong>{selectedMatch.metricSummary.healingPerSecond}</strong>
+                    </article>
+                    <article>
+                      <span>Casts/min</span>
+                      <strong>{selectedMatch.metricSummary.castsPerMinute}</strong>
+                    </article>
+                  </section>
+                ) : null}
+
                 <div className="review-grid">
                   <label className="review-block">
                     <span>Manual ChatGPT Prompt</span>
@@ -578,6 +814,138 @@ export function HomePage() {
                       onChange={(event) => setManualResponseText(event.target.value)}
                     />
                   </label>
+                </div>
+
+                <div className="review-grid secondary-grid">
+                  <div className="review-block review-list-block">
+                    <span>Spell Metrics</span>
+                    {selectedMatch.spellMetrics.length === 0 ? (
+                      <p className="muted-copy">No spell metrics persisted yet.</p>
+                    ) : (
+                      selectedMatch.spellMetrics.slice(0, 18).map((metric) => (
+                        <article
+                          key={metric.spellName}
+                          className="insight-card"
+                        >
+                          <strong>{metric.spellName}</strong>
+                          <p>
+                            casts {metric.castCount} · damage {metric.totalDamage} · healing{" "}
+                            {metric.totalHealing}
+                          </p>
+                        </article>
+                      ))
+                    )}
+                  </div>
+
+                  <div className="review-block review-list-block">
+                    <span>Coach Knowledge</span>
+                    {selectedMatch.coachKnowledgeParameters.length === 0 ? (
+                      <p className="muted-copy">No accumulated coach parameters yet.</p>
+                    ) : (
+                      selectedMatch.coachKnowledgeParameters.map((item) => (
+                        <article
+                          key={`${item.scope}-${item.specLabel}-${item.metric}`}
+                          className="insight-card"
+                        >
+                          <strong>{item.metric}</strong>
+                          <p>
+                            {item.specLabel ?? "global"} · target {item.targetValue ?? "unknown"}
+                            {item.unit ? ` (${item.unit})` : ""} · evidence {item.evidenceCount}
+                          </p>
+                          {item.note ? <p>{item.note}</p> : null}
+                        </article>
+                      ))
+                    )}
+                  </div>
+
+                  <div className="review-block review-list-block">
+                    <span>Coach Skills</span>
+                    {selectedMatch.coachSkills.length === 0 ? (
+                      <p className="muted-copy">No accumulated coach skills yet.</p>
+                    ) : (
+                      selectedMatch.coachSkills.map((item) => (
+                        <article
+                          key={`${item.scope}-${item.specLabel}-${item.area}-${item.goal}`}
+                          className="insight-card"
+                        >
+                          <strong>{item.area}</strong>
+                          <p>
+                            {item.specLabel ?? "global"} · {item.goal} · evidence {item.evidenceCount}
+                          </p>
+                          {item.drill ? <p>{item.drill}</p> : null}
+                        </article>
+                      ))
+                    )}
+                  </div>
+
+                  <div className="review-block review-list-block">
+                    <span>Review Clips</span>
+                    {selectedMatch.videoClips.length === 0 ? (
+                      <p className="muted-copy">
+                        No clips generated yet. Process the video and generate clips from markers,
+                        insights, and validation targets.
+                      </p>
+                    ) : (
+                      <div className="clip-grid">
+                        {selectedMatch.videoClips.map((clip) => (
+                          <article
+                            key={`${clip.source}-${clip.videoSecond}-${clip.label}`}
+                            className="clip-card"
+                          >
+                            <strong>{clip.label}</strong>
+                            <p>
+                              {formatDuration(clip.startSecond)} to {formatDuration(clip.endSecond)} ·{" "}
+                              {clip.category}
+                            </p>
+                            <video
+                              controls
+                              className="clip-player"
+                              src={toLocalFileSource(clip.clipPath)}
+                            />
+                          </article>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="review-block review-list-block">
+                    <span>Structured Insights</span>
+                    {selectedMatch.insights.length === 0 ? (
+                      <p className="muted-copy">No structured insights imported yet.</p>
+                    ) : (
+                      selectedMatch.insights.map((insight) => (
+                        <article
+                          key={`${insight.source}-${insight.videoSecond}-${insight.title}`}
+                          className="insight-card"
+                        >
+                          <strong>{insight.title}</strong>
+                          <p>{insight.summary}</p>
+                          {insight.recommendation ? <p>{insight.recommendation}</p> : null}
+                        </article>
+                      ))
+                    )}
+                  </div>
+
+                  <div className="review-block review-list-block">
+                    <span>Validation Targets</span>
+                    {selectedMatch.validationTargets.length === 0 ? (
+                      <p className="muted-copy">No validation targets imported yet.</p>
+                    ) : (
+                      selectedMatch.validationTargets.map((target) => (
+                        <article
+                          key={`${target.source}-${target.videoSecond}-${target.metric}`}
+                          className="insight-card"
+                        >
+                          <strong>{target.metric}</strong>
+                          <p>
+                            {target.currentValue ?? "unknown"} → {target.expectedValue ?? "target"}
+                            {target.unit ? ` (${target.unit})` : ""}
+                          </p>
+                          {target.note ? <p>{target.note}</p> : null}
+                        </article>
+                      ))
+                    )}
+                  </div>
                 </div>
 
                 <div className="button-row">

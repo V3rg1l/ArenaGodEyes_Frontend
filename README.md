@@ -13,6 +13,20 @@ It is the UI that will be hosted by Electron and powered by the local .NET backe
 - `src/arena-god-eyes-ui`
   - Vite application
 
+## Current State
+
+The current UI already covers:
+
+- settings
+- setup validation
+- addon install flow
+- import actions
+- match library
+- review screen
+- manual ChatGPT export and import
+- OBS test and manual controls
+- processed thumbnail and video metadata display
+
 ## Required Future Screens
 
 - settings

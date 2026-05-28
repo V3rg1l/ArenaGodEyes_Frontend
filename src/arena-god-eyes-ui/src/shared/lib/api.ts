@@ -5,8 +5,13 @@ import type {
   ManualAnalysisImportResult,
   MatchLibraryItem,
   MatchReviewDetails,
+  ObsConnectionStatus,
+  ObsRecordingStartResult,
+  ObsRecordingStopResult,
   SettingsValidationResult,
   SystemStatus,
+  VideoClipGenerationResult,
+  VideoProcessingResult,
 } from "../types/api";
 
 const apiBaseUrl =
@@ -79,6 +84,29 @@ export const api = {
     }),
   exportPrompt: (matchId: string) =>
     request<ChatGptPromptExport>(`/api/matches/${matchId}/export-chatgpt-prompt`, {
+      method: "POST",
+    }),
+  getObsStatus: () => request<ObsConnectionStatus>("/api/video/obs/status"),
+  testObsConnection: () =>
+    request<ObsConnectionStatus>("/api/video/obs/test-connection", {
+      method: "POST",
+    }),
+  startObsRecording: (matchId: string | null) =>
+    request<ObsRecordingStartResult>("/api/video/obs/start-recording", {
+      method: "POST",
+      body: JSON.stringify({ matchId }),
+    }),
+  stopObsRecording: (matchId: string | null) =>
+    request<ObsRecordingStopResult>("/api/video/obs/stop-recording", {
+      method: "POST",
+      body: JSON.stringify({ matchId }),
+    }),
+  processMatchVideo: (matchId: string) =>
+    request<VideoProcessingResult>(`/api/matches/${matchId}/process-video`, {
+      method: "POST",
+    }),
+  generateReviewClips: (matchId: string) =>
+    request<VideoClipGenerationResult>(`/api/matches/${matchId}/generate-review-clips`, {
       method: "POST",
     }),
   importManualAnalysis: (matchId: string, responseText: string) =>

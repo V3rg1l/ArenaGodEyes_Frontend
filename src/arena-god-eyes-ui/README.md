@@ -10,14 +10,20 @@ It is meant to be hosted inside the Electron desktop shell and communicate with 
 
 ## Current Direction
 
-The UI foundation should evolve toward:
+The UI already supports:
 
-- settings
-- match and video library
-- review dashboard
-- Details++ metrics
-- timeline markers
-- manual ChatGPT response import and display
+- settings and setup flows
+- match list and review flows
+- manual ChatGPT prompt export and response import
+- OBS status and manual recording controls
+- video thumbnail and metadata display
+
+The next UI evolution should focus on:
+
+- clip review actions
+- richer Details++ metrics
+- stronger validation target display
+- deeper video-review workflow
 
 ## Development Rule
 

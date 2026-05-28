@@ -172,6 +172,19 @@
   background: rgba(102, 39, 34, 0.12);
 }
 
+.obs-status-shell {
+  margin-top: 1rem;
+  padding: 1rem;
+  border-radius: 18px;
+  border: 1px solid var(--line-soft);
+  background: rgba(12, 16, 20, 0.72);
+}
+
+.obs-status-shell p {
+  margin: 0.4rem 0 0;
+  color: var(--text-soft);
+}
+
 .validation-shell ul {
   margin: 0.65rem 0 0;
   padding-left: 1.2rem;
@@ -259,6 +272,16 @@
   background: linear-gradient(180deg, rgba(7, 8, 10, 0.92), rgba(15, 18, 22, 0.96));
 }
 
+.video-thumbnail {
+  display: block;
+  width: 100%;
+  max-height: 240px;
+  object-fit: cover;
+  border-radius: 20px;
+  border: 1px solid var(--line-soft);
+  margin-bottom: 1rem;
+}
+
 .video-player,
 .video-placeholder {
   width: 100%;
@@ -274,6 +297,10 @@
 }
 
 .timeline-shell {
+  margin-top: 1rem;
+}
+
+.review-metric-band {
   margin-top: 1rem;
 }
 
@@ -341,6 +368,54 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1rem;
   margin-top: 1rem;
+}
+
+.secondary-grid {
+  margin-top: 1rem;
+}
+
+.review-list-block {
+  align-content: start;
+}
+
+.insight-card {
+  padding: 0.9rem 1rem;
+  border-radius: 16px;
+  border: 1px solid var(--line-soft);
+  background: rgba(14, 18, 22, 0.78);
+}
+
+.insight-card + .insight-card {
+  margin-top: 0.75rem;
+}
+
+.insight-card p {
+  margin: 0.35rem 0 0;
+  color: var(--text-soft);
+}
+
+.clip-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 0.9rem;
+}
+
+.clip-card {
+  padding: 0.9rem 1rem;
+  border-radius: 16px;
+  border: 1px solid var(--line-soft);
+  background: rgba(14, 18, 22, 0.78);
+}
+
+.clip-card p {
+  margin: 0.35rem 0 0.75rem;
+  color: var(--text-soft);
+}
+
+.clip-player {
+  width: 100%;
+  border-radius: 14px;
+  background: #07090b;
 }
 
 .raw-json {
