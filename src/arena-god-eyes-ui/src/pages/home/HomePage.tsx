@@ -682,12 +682,12 @@ export function HomePage() {
     <main className="home-page">
       <section className="hero-stage">
         <div className="hero-copy">
-          <p className="home-kicker">ArenaGodEyes replay desk</p>
-          <h1>Post-match coaching with evidence, clips, metrics, and memory.</h1>
+          <p className="home-kicker">ArenaGodEyes control room</p>
+          <h1>Arena replay review, recording, and coaching in one desktop workspace.</h1>
           <p className="home-summary">
-            Safe Blizzard-compliant analysis only. Build the match record, review the
-            video, export the coach prompt, and keep growing class/spec knowledge in
-            the local database.
+            Blizzard-safe post-match workflow only. Capture with OBS, process with
+            FFmpeg and FFprobe, review evidence on video, and keep growing the local
+            class and spec knowledge base.
           </p>
           <div className="hero-badges">
             <span className="hero-badge"><Glyph name="shield" /> Post-match only</span>

@@ -1,24 +1,24 @@
 :root {
-  --bg-obsidian: #090c10;
-  --bg-panel: rgba(15, 20, 26, 0.92);
-  --bg-panel-soft: rgba(21, 26, 34, 0.86);
-  --line-soft: rgba(255, 235, 211, 0.1);
-  --line-strong: rgba(255, 197, 126, 0.32);
-  --text-main: #f4ecdf;
-  --text-soft: rgba(244, 236, 223, 0.72);
-  --accent-fire: #ed842e;
-  --accent-sky: #5dc7ff;
-  --accent-blood: #ff6f61;
-  --accent-growth: #95d26b;
-  --shadow-panel: 0 22px 70px rgba(0, 0, 0, 0.32);
-  font-family: "Avenir Next", "Segoe UI", "Trebuchet MS", sans-serif;
+  --bg-obsidian: #091018;
+  --bg-panel: rgba(14, 21, 30, 0.94);
+  --bg-panel-soft: rgba(18, 26, 37, 0.9);
+  --line-soft: rgba(134, 154, 181, 0.16);
+  --line-strong: rgba(141, 166, 222, 0.36);
+  --text-main: #edf3fb;
+  --text-soft: rgba(207, 218, 232, 0.76);
+  --accent-fire: #d0a16e;
+  --accent-sky: #82b6f3;
+  --accent-blood: #d97a7a;
+  --accent-growth: #83c8a8;
+  --shadow-panel: 0 22px 48px rgba(0, 0, 0, 0.28);
+  font-family: "Segoe UI Variable Display", "Segoe UI", "Trebuchet MS", sans-serif;
   line-height: 1.5;
   font-weight: 400;
   color: var(--text-main);
   background:
-    radial-gradient(circle at top left, rgba(237, 132, 46, 0.16), transparent 24%),
-    radial-gradient(circle at top right, rgba(93, 199, 255, 0.12), transparent 20%),
-    linear-gradient(180deg, #0d1217 0%, #090c10 48%, #07090b 100%);
+    radial-gradient(circle at top left, rgba(89, 111, 176, 0.16), transparent 22%),
+    radial-gradient(circle at top right, rgba(66, 90, 126, 0.16), transparent 18%),
+    linear-gradient(180deg, #101824 0%, #0b121b 45%, #090e16 100%);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -57,10 +57,10 @@ input,
 textarea {
   width: 100%;
   border: 1px solid var(--line-soft);
-  border-radius: 16px;
-  background: rgba(10, 13, 16, 0.82);
+  border-radius: 12px;
+  background: rgba(7, 11, 17, 0.92);
   color: var(--text-main);
-  padding: 0.9rem 1rem;
+  padding: 0.82rem 0.95rem;
 }
 
 textarea {
@@ -70,8 +70,8 @@ textarea {
 
 input:focus,
 textarea:focus {
-  outline: 2px solid rgba(237, 132, 46, 0.22);
-  border-color: rgba(237, 132, 46, 0.35);
+  outline: 2px solid rgba(130, 182, 243, 0.18);
+  border-color: rgba(130, 182, 243, 0.34);
 }
 
 a {
