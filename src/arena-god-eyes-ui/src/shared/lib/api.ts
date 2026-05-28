@@ -1,6 +1,7 @@
 import type {
   AppSettings,
   ChatGptPromptExport,
+  FirstRunBootstrapStatus,
   ImportedMatchesResult,
   ManualAnalysisImportResult,
   MatchLibraryItem,
@@ -8,7 +9,9 @@ import type {
   ObsConnectionStatus,
   ObsRecordingStartResult,
   ObsRecordingStopResult,
+  ObsSceneSetupResult,
   SettingsValidationResult,
+  StorageOverview,
   SystemStatus,
   VideoClipGenerationResult,
   VideoProcessingResult,
@@ -45,6 +48,7 @@ async function request<T>(
 
 export const api = {
   getSystemStatus: () => request<SystemStatus>("/api/system/status"),
+  getBootstrapStatus: () => request<FirstRunBootstrapStatus>("/api/system/bootstrap-status"),
   getSettings: () => request<AppSettings>("/api/settings"),
   saveSettings: (settings: AppSettings) =>
     request<AppSettings>("/api/settings", {
@@ -56,6 +60,7 @@ export const api = {
       method: "POST",
       body: JSON.stringify(settings),
     }),
+  getStorageOverview: () => request<StorageOverview>("/api/settings/storage-overview"),
   detectWowPath: () =>
     request<{ wowRetailPath: string | null }>("/api/settings/detect-wow", {
       method: "POST",
@@ -90,6 +95,19 @@ export const api = {
   testObsConnection: () =>
     request<ObsConnectionStatus>("/api/video/obs/test-connection", {
       method: "POST",
+    }),
+  ensureObsWowScene: (requestBody: {
+    windowTitle: string;
+    executableName: string;
+    windowClassName: string | null;
+    captureMode: string;
+    captureCursor: boolean;
+    sceneName: string | null;
+    sourceName: string | null;
+  }) =>
+    request<ObsSceneSetupResult>("/api/video/obs/ensure-wow-scene", {
+      method: "POST",
+      body: JSON.stringify(requestBody),
     }),
   startObsRecording: (matchId: string | null) =>
     request<ObsRecordingStartResult>("/api/video/obs/start-recording", {

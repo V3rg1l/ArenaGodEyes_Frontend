@@ -1,22 +1,28 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useEffectEvent, useMemo, useState, type ReactNode } from "react";
 import { TimelineMarkerRail } from "../../shared/components/TimelineMarkerRail";
 import { api } from "../../shared/lib/api";
 import type {
   AppSettings,
   CoachKnowledgeParameterItem,
   CoachSkillItem,
+  FirstRunBootstrapStatus,
   MatchBenchmarkComparisonItem,
   MatchLibraryItem,
+  MatchParticipantReviewItem,
+  MatchParticipantSummaryItem,
   MatchReviewDetails,
   MatchSpellMetricItem,
   ObsConnectionStatus,
+  ObsSceneSetupResult,
   RuleCoachFindingItem,
   SettingsValidationResult,
   SpecPerformanceSnapshotItem,
+  StorageOverview,
   SystemStatus,
 } from "../../shared/types/api";
 import "../../shared/styles/home-page.css";
 import "../../shared/types/desktop";
+import type { DesktopObsLaunchStatus, DesktopWowWindow } from "../../shared/types/desktop";
 
 const emptySettings: AppSettings = {
   id: 1,
@@ -54,10 +60,9 @@ type GlyphName =
   | "three"
   | "two"
   | "skirmish"
+  | "favourites"
   | "clips"
-  | "details"
-  | "coach"
-  | "learning"
+  | "diagnostics"
   | "settings"
   | "scene"
   | "verify"
@@ -73,18 +78,25 @@ type AppView =
   | "3v3"
   | "2v2"
   | "skirmish"
+  | "favourites"
   | "clips"
-  | "details"
-  | "coach"
-  | "learning"
+  | "diagnostics"
   | "settings"
   | "scene"
   | "verify"
   | "review";
 
-type SettingsTab = "storage" | "detection" | "application" | "recording" | "advanced";
+type SettingsTab =
+  | "storage"
+  | "detection"
+  | "application"
+  | "recording"
+  | "obs"
+  | "video"
+  | "audio"
+  | "advanced";
 type SceneTab = "source" | "video" | "audio";
-type ReviewTab = "overview" | "details" | "coach" | "learning" | "chatgpt" | "json";
+type ReviewTab = "overview" | "video" | "timeline" | "details" | "coach" | "chatgpt" | "export" | "raw" | "json";
 type CaptureMode = "game" | "window" | "monitor";
 
 type SidebarItem = {
@@ -99,15 +111,14 @@ const librarySidebarItems: SidebarItem[] = [
   { key: "3v3", label: "3v3", icon: "three" },
   { key: "2v2", label: "2v2", icon: "two" },
   { key: "skirmish", label: "Skirmish", icon: "skirmish" },
+  { key: "favourites", label: "Favourites", icon: "favourites" },
 ];
 
 const systemSidebarItems: SidebarItem[] = [
   { key: "clips", label: "Clips", icon: "clips" },
-  { key: "details", label: "Details++", icon: "details" },
-  { key: "coach", label: "Coach Analysis", icon: "coach" },
-  { key: "learning", label: "Learning Database", icon: "learning" },
   { key: "settings", label: "Settings", icon: "settings" },
   { key: "scene", label: "Scene", icon: "scene" },
+  { key: "diagnostics", label: "Export Logs / Diagnostics", icon: "diagnostics" },
   { key: "verify", label: "Verify Setup", icon: "verify" },
 ];
 
@@ -116,6 +127,9 @@ const settingsTabs: Array<{ key: SettingsTab; label: string }> = [
   { key: "detection", label: "Detection" },
   { key: "application", label: "Application" },
   { key: "recording", label: "Recording" },
+  { key: "obs", label: "OBS" },
+  { key: "video", label: "Video" },
+  { key: "audio", label: "Audio" },
   { key: "advanced", label: "Advanced" },
 ];
 
@@ -127,12 +141,17 @@ const sceneTabs: Array<{ key: SceneTab; label: string }> = [
 
 const reviewTabs: Array<{ key: ReviewTab; label: string }> = [
   { key: "overview", label: "Overview" },
+  { key: "video", label: "Video" },
+  { key: "timeline", label: "Timeline" },
   { key: "details", label: "Details++" },
-  { key: "coach", label: "Coach Findings" },
-  { key: "learning", label: "Learning" },
-  { key: "chatgpt", label: "ChatGPT Analysis" },
+  { key: "coach", label: "Coach" },
+  { key: "chatgpt", label: "ChatGPT" },
+  { key: "export", label: "Export / Import" },
+  { key: "raw", label: "Raw Events" },
   { key: "json", label: "JSON" },
 ];
+
+const favoriteStorageKey = "arena-god-eyes:favourite-matches";
 
 function toLocalFileSource(path: string | null) {
   if (!path) {
@@ -168,6 +187,30 @@ function formatDateLabel(value: string) {
   }).format(new Date(value));
 }
 
+function formatDateTimeLabel(value: string) {
+  return new Intl.DateTimeFormat("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
+
+function formatStorageGigabytes(value: number) {
+  return `${value.toFixed(value >= 10 ? 1 : 2)} GB`;
+}
+
+function formatStorageUsedLine(overview: StorageOverview | null, fallbackLimitGb: number) {
+  if (!overview) {
+    return `Used 0 GB / ${fallbackLimitGb || 0} GB`;
+  }
+
+  const used = formatStorageGigabytes(overview.totalGigabytes);
+  const limit = overview.maxDiskStorageGb > 0 ? `${overview.maxDiskStorageGb} GB` : "Unlimited";
+  return `Used ${used} / ${limit}`;
+}
+
 function titleize(input: string | null | undefined) {
   if (!input) {
     return "Unknown";
@@ -181,6 +224,19 @@ function titleize(input: string | null | undefined) {
     .join(" ");
 }
 
+function initials(input: string | null | undefined) {
+  if (!input) {
+    return "AG";
+  }
+
+  return input
+    .split(/[\s/-]+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? "")
+    .join("");
+}
+
 function scopeLabel(item: { scope: string; className: string | null; specLabel: string | null }) {
   if (item.scope === "spec" && item.specLabel) {
     return item.className ? `${item.className} / ${item.specLabel}` : item.specLabel;
@@ -191,6 +247,40 @@ function scopeLabel(item: { scope: string; className: string | null; specLabel: 
   }
 
   return "Global";
+}
+
+function participantLabel(participant: { className: string | null; specLabel: string | null; name: string }) {
+  return participant.specLabel ?? participant.className ?? participant.name;
+}
+
+function participantTone(participant: { isTrackedPlayer: boolean; teamId: number }, trackedTeamId: number | null) {
+  if (participant.isTrackedPlayer) {
+    return "tracked";
+  }
+
+  if (trackedTeamId === null) {
+    return "neutral";
+  }
+
+  return participant.teamId === trackedTeamId ? "ally" : "enemy";
+}
+
+function resolveTrackedTeamId(
+  participants: Array<{ teamId: number; isTrackedPlayer: boolean }>,
+) {
+  return participants.find((item) => item.isTrackedPlayer)?.teamId ?? null;
+}
+
+function buildParticipantGroups<T extends { teamId: number; isTrackedPlayer: boolean }>(
+  participants: T[],
+) {
+  const trackedTeamId = resolveTrackedTeamId(participants);
+  const allies = participants.filter((item) => item.teamId === trackedTeamId);
+  const enemies = trackedTeamId === null
+    ? participants.filter((item) => !item.isTrackedPlayer)
+    : participants.filter((item) => item.teamId !== trackedTeamId);
+
+  return { trackedTeamId, allies, enemies };
 }
 
 function categoryTone(category: string | null) {
@@ -244,7 +334,14 @@ function resultTone(result: string | null) {
 }
 
 function isLibraryView(view: AppView) {
-  return view === "all" || view === "shuffle" || view === "3v3" || view === "2v2" || view === "skirmish";
+  return (
+    view === "all" ||
+    view === "shuffle" ||
+    view === "3v3" ||
+    view === "2v2" ||
+    view === "skirmish" ||
+    view === "favourites"
+  );
 }
 
 function matchesViewFilter(match: MatchLibraryItem, view: AppView) {
@@ -321,31 +418,24 @@ function Glyph({ name }: { name: GlyphName }) {
         <path d="m17 5-10 14" />
       </>
     ),
+    favourites: (
+      <>
+        <path d="m12 4 2.4 4.9 5.4.8-3.9 3.8.9 5.4L12 16.8 7.2 19l.9-5.4-3.9-3.8 5.4-.8z" />
+      </>
+    ),
     clips: (
       <>
         <rect x="4" y="6" width="14" height="12" rx="2" />
         <path d="m18 10 3-2v8l-3-2" />
       </>
     ),
-    details: (
+    diagnostics: (
       <>
-        <path d="M5 18V9" />
-        <path d="M10 18V5" />
-        <path d="M15 18v-7" />
-        <path d="M20 18v-4" />
-      </>
-    ),
-    coach: (
-      <>
-        <path d="M12 4a6 6 0 0 1 3.6 10.8c-.8.6-1.3 1.4-1.6 2.2h-4c-.3-.8-.8-1.6-1.6-2.2A6 6 0 0 1 12 4Z" />
-        <path d="M9.5 20h5" />
-      </>
-    ),
-    learning: (
-      <>
-        <path d="M5 7.5 12 4l7 3.5-7 3.5Z" />
-        <path d="M5 12.5 12 16l7-3.5" />
-        <path d="M5 17.5 12 21l7-3.5" />
+        <path d="M4 12h6" />
+        <path d="M14 7h6" />
+        <path d="M14 17h6" />
+        <circle cx="12" cy="12" r="2.5" />
+        <circle cx="12" cy="12" r="7.5" />
       </>
     ),
     settings: (
@@ -436,6 +526,113 @@ function SnapshotRail({ snapshot }: { snapshot: SpecPerformanceSnapshotItem | nu
         </article>
       ))}
     </div>
+  );
+}
+
+function ParticipantBadge({
+  participant,
+  trackedTeamId,
+  compact = false,
+}: {
+  participant: MatchParticipantSummaryItem | MatchParticipantReviewItem;
+  trackedTeamId: number | null;
+  compact?: boolean;
+}) {
+  const tone = participantTone(participant, trackedTeamId);
+
+  return (
+    <article className={`participant-badge participant-${tone} ${compact ? "compact" : ""}`}>
+      <span className="participant-avatar">{initials(participantLabel(participant))}</span>
+      <div className="participant-copy">
+        <strong>{participant.name}</strong>
+        <span>{participant.specLabel ?? participant.className ?? "Class pending"}</span>
+      </div>
+      {participant.isTrackedPlayer ? <span className="participant-tag">You</span> : null}
+    </article>
+  );
+}
+
+function MatchRosterStrip({ participants }: { participants: MatchParticipantSummaryItem[] }) {
+  const { trackedTeamId, allies, enemies } = buildParticipantGroups(participants);
+
+  return (
+    <div className="match-roster-strip">
+      <div className="match-roster-group">
+        <span className="match-roster-label">Your Team</span>
+        <div className="match-roster-icons">
+          {allies.map((participant) => (
+            <span
+              key={`${participant.teamId}-${participant.name}`}
+              className={`roster-spec-chip ${participant.isTrackedPlayer ? "tracked" : "ally"}`}
+              title={`${participant.name} • ${participant.specLabel ?? participant.className ?? "Unknown"}`}
+            >
+              {initials(participantLabel(participant))}
+            </span>
+          ))}
+        </div>
+      </div>
+      <span className="match-roster-versus">VS</span>
+      <div className="match-roster-group enemy">
+        <span className="match-roster-label">Enemy Team</span>
+        <div className="match-roster-icons">
+          {enemies.map((participant) => (
+            <span
+              key={`${participant.teamId}-${participant.name}`}
+              className="roster-spec-chip enemy"
+              title={`${participant.name} • ${participant.specLabel ?? participant.className ?? "Unknown"}`}
+            >
+              {initials(participantLabel(participant))}
+            </span>
+          ))}
+        </div>
+      </div>
+      {trackedTeamId === null ? null : <span className="match-roster-count">{participants.length} players</span>}
+    </div>
+  );
+}
+
+function MatchRosterPanel({ participants }: { participants: MatchParticipantReviewItem[] }) {
+  const { trackedTeamId, allies, enemies } = buildParticipantGroups(participants);
+
+  return (
+    <article className="summary-card roster-panel-card">
+      <div className="summary-card-topline">
+        <strong>Match roster</strong>
+        <span className="tone-chip tone-stone">{participants.length} players</span>
+      </div>
+      <div className="roster-panel-grid">
+        <div className="roster-column">
+          <div className="roster-column-header">
+            <strong>Your team</strong>
+            <span>{allies.length}</span>
+          </div>
+          <div className="roster-column-list">
+            {allies.map((participant) => (
+              <ParticipantBadge
+                key={participant.guid}
+                participant={participant}
+                trackedTeamId={trackedTeamId}
+              />
+            ))}
+          </div>
+        </div>
+        <div className="roster-column">
+          <div className="roster-column-header">
+            <strong>Enemies</strong>
+            <span>{enemies.length}</span>
+          </div>
+          <div className="roster-column-list">
+            {enemies.map((participant) => (
+              <ParticipantBadge
+                key={participant.guid}
+                participant={participant}
+                trackedTeamId={trackedTeamId}
+              />
+            ))}
+          </div>
+        </div>
+      </div>
+    </article>
   );
 }
 
@@ -554,7 +751,9 @@ function SettingsRow({ title, description, controls }: SettingsRowProps) {
 
 export function HomePage() {
   const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
+  const [bootstrapStatus, setBootstrapStatus] = useState<FirstRunBootstrapStatus | null>(null);
   const [settings, setSettings] = useState<AppSettings>(emptySettings);
+  const [storageOverview, setStorageOverview] = useState<StorageOverview | null>(null);
   const [validation, setValidation] = useState<SettingsValidationResult | null>(null);
   const [obsStatus, setObsStatus] = useState<ObsConnectionStatus | null>(null);
   const [matches, setMatches] = useState<MatchLibraryItem[]>([]);
@@ -564,17 +763,28 @@ export function HomePage() {
   const [promptText, setPromptText] = useState("");
   const [statusMessage, setStatusMessage] = useState("Workspace warming up.");
   const [isBusy, setIsBusy] = useState(false);
+  const [favouriteMatchIds, setFavouriteMatchIds] = useState<string[]>(() => {
+    try {
+      const raw = globalThis.localStorage?.getItem(favoriteStorageKey);
+      return raw ? (JSON.parse(raw) as string[]) : [];
+    } catch {
+      return [];
+    }
+  });
   const [activeView, setActiveView] = useState<AppView>("all");
   const [activeSettingsTab, setActiveSettingsTab] = useState<SettingsTab>("storage");
   const [activeSceneTab, setActiveSceneTab] = useState<SceneTab>("source");
   const [activeReviewTab, setActiveReviewTab] = useState<ReviewTab>("overview");
   const [libraryQuery, setLibraryQuery] = useState("");
-  const [onlyWithVideo, setOnlyWithVideo] = useState(false);
+  const [onlyWithVideo, setOnlyWithVideo] = useState(true);
   const [onlyNeedsAnalysis, setOnlyNeedsAnalysis] = useState(false);
   const [showSensitiveValues, setShowSensitiveValues] = useState(false);
+  const [wowWindows, setWowWindows] = useState<DesktopWowWindow[]>([]);
+  const [obsLaunchStatus, setObsLaunchStatus] = useState<DesktopObsLaunchStatus | null>(null);
+  const [sceneSetupResult, setSceneSetupResult] = useState<ObsSceneSetupResult | null>(null);
   const [captureMode, setCaptureMode] = useState<CaptureMode>("window");
   const [captureCursor, setCaptureCursor] = useState(true);
-  const [sceneTarget, setSceneTarget] = useState<"wow-a" | "wow-b" | "auto">("wow-a");
+  const [sceneTarget, setSceneTarget] = useState<"wow-a" | "wow-b" | "auto">("auto");
 
   useEffect(() => {
     void loadDashboard();
@@ -588,6 +798,26 @@ export function HomePage() {
     void loadMatch(selectedMatchId);
   }, [selectedMatchId]);
 
+  useEffect(() => {
+    try {
+      globalThis.localStorage?.setItem(favoriteStorageKey, JSON.stringify(favouriteMatchIds));
+    } catch {
+      // Ignore storage persistence failures in browser-restricted environments.
+    }
+  }, [favouriteMatchIds]);
+
+  const runSceneAutomationRefresh = useEffectEvent(async () => {
+    await refreshSceneAutomation();
+  });
+
+  useEffect(() => {
+    if (activeView !== "scene") {
+      return;
+    }
+
+    void runSceneAutomationRefresh();
+  }, [activeView]);
+
   const pendingAnalyses = useMemo(
     () => matches.filter((match) => !match.hasManualAnalysis).length,
     [matches],
@@ -598,8 +828,9 @@ export function HomePage() {
       total: matches.length,
       analyzed: matches.filter((match) => match.hasManualAnalysis).length,
       withVideo: matches.filter((match) => match.hasVideo).length,
+      favourites: matches.filter((match) => favouriteMatchIds.includes(match.matchId)).length,
     }),
-    [matches],
+    [favouriteMatchIds, matches],
   );
 
   const filteredMatches = useMemo(() => {
@@ -607,6 +838,10 @@ export function HomePage() {
 
     return matches.filter((match) => {
       if (isLibraryView(activeView) && !matchesViewFilter(match, activeView)) {
+        return false;
+      }
+
+      if (activeView === "favourites" && !favouriteMatchIds.includes(match.matchId)) {
         return false;
       }
 
@@ -636,7 +871,7 @@ export function HomePage() {
 
       return haystack.includes(query);
     });
-  }, [activeView, libraryQuery, matches, onlyNeedsAnalysis, onlyWithVideo]);
+  }, [activeView, favouriteMatchIds, libraryQuery, matches, onlyNeedsAnalysis, onlyWithVideo]);
 
   const groupedMatches = useMemo(() => {
     const buckets: Record<string, MatchLibraryItem[]> = {
@@ -668,44 +903,62 @@ export function HomePage() {
   }, [selectedMatch]);
 
   const sceneSources = useMemo(
-    () => [
-      {
-        key: "wow-a" as const,
-        title: "WoW Session A",
-        description: settings.wowRetailPath
-          ? "Primary configured client and preferred queue window."
-          : "Primary client slot for your main WoW window.",
-      },
-      {
-        key: "wow-b" as const,
-        title: "WoW Session B",
-        description: "Secondary open WoW client, alt account, or second monitor session.",
-      },
-      {
-        key: "auto" as const,
-        title: "Auto active WoW",
-        description: "Use the active session target when the app starts a recording workflow.",
-      },
-    ],
-    [settings.wowRetailPath],
+    () => {
+      const hasMultipleWowWindows = wowWindows.length > 1;
+
+      return [
+        {
+          key: "wow-a" as const,
+          title: hasMultipleWowWindows ? "WoW Session A" : "Detected WoW",
+          description: wowWindows[0]?.title
+            ? `${wowWindows[0].title} (${wowWindows[0].executableName ?? wowWindows[0].processName})`
+            : settings.wowRetailPath
+              ? "Primary configured client and preferred queue window."
+              : "Primary client slot for your main WoW window.",
+        },
+        {
+          key: "wow-b" as const,
+          title: hasMultipleWowWindows ? "WoW Session B" : "Second WoW instance",
+          description: wowWindows[1]?.title
+            ? `${wowWindows[1].title} (${wowWindows[1].executableName ?? wowWindows[1].processName})`
+            : "Only used when a second WoW client is open.",
+        },
+        {
+          key: "auto" as const,
+          title: "Auto active WoW",
+          description: wowWindows[0]?.title
+            ? `Use ${wowWindows[0].title} as the preferred automatic capture target.`
+            : "Use the active session target when the app starts a recording workflow.",
+        },
+      ];
+    },
+    [settings.wowRetailPath, wowWindows],
   );
 
   async function loadDashboard() {
     setIsBusy(true);
     try {
-      const [statusResult, settingsResult, matchesResult] = await Promise.all([
+      const [statusResult, bootstrapStatusResult, settingsResult, matchesResult, storageOverviewResult] = await Promise.all([
         api.getSystemStatus(),
+        api.getBootstrapStatus(),
         api.getSettings(),
         api.listMatches(),
+        api.getStorageOverview(),
       ]);
 
       setSystemStatus(statusResult);
+      setBootstrapStatus(bootstrapStatusResult);
       setSettings(settingsResult);
       setMatches(matchesResult);
+      setStorageOverview(storageOverviewResult);
       setSelectedMatchId((current) => current ?? matchesResult[0]?.matchId ?? null);
       const latestObsStatus = await api.getObsStatus();
       setObsStatus(latestObsStatus);
-      setStatusMessage("Backend online. Ready for post-match review and coach learning.");
+      setStatusMessage(
+        bootstrapStatusResult.pendingActions.length > 0
+          ? `Bootstrap pending: ${bootstrapStatusResult.pendingActions.join(", ")}.`
+          : "Backend online. Ready for post-match review and coach learning.",
+      );
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : "Failed to load dashboard.");
     } finally {
@@ -749,7 +1002,9 @@ export function HomePage() {
     setIsBusy(true);
     try {
       const updated = await api.saveSettings(settings);
+      const updatedStorageOverview = await api.getStorageOverview();
       setSettings(updated);
+      setStorageOverview(updatedStorageOverview);
       setStatusMessage("Settings saved locally.");
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : "Failed to save settings.");
@@ -791,6 +1046,27 @@ export function HomePage() {
     } finally {
       setIsBusy(false);
     }
+  }
+
+  function handleApplyStorageDefaults() {
+    setSettings((current) => ({
+      ...current,
+      recordingDirectory: storageOverview?.defaultRecordingDirectory ?? current.recordingDirectory,
+      recordingCacheDirectory: storageOverview?.defaultRecordingCacheDirectory ?? current.recordingCacheDirectory,
+      maxDiskStorageGb: current.maxDiskStorageGb || 100,
+      maxMatchFiles: current.maxMatchFiles || 1000,
+    }));
+    setStatusMessage("Storage defaults prepared locally. Save settings to persist them.");
+  }
+
+  function handleResetStorageLimit() {
+    updateSetting("maxDiskStorageGb", 100);
+    setStatusMessage("Maximum disk storage reset to 100 GB.");
+  }
+
+  function handleResetMatchFiles() {
+    updateSetting("maxMatchFiles", 1000);
+    setStatusMessage("Maximum match files reset to 1000.");
   }
 
   async function handleInstallAddon() {
@@ -855,6 +1131,93 @@ export function HomePage() {
       setStatusMessage(error instanceof Error ? error.message : "Failed to stop OBS recording.");
     } finally {
       setIsBusy(false);
+    }
+  }
+
+  function getSelectedWowWindow() {
+    if (wowWindows.length === 0) {
+      return null;
+    }
+
+    if (wowWindows.length === 1) {
+      return wowWindows[0];
+    }
+
+    if (sceneTarget === "wow-b") {
+      return wowWindows[1] ?? wowWindows[0];
+    }
+
+    return wowWindows[0];
+  }
+
+  async function handlePrepareObsScene(windowOverride?: DesktopWowWindow | null) {
+    const selectedWindow = windowOverride ?? getSelectedWowWindow();
+    if (!selectedWindow) {
+      setStatusMessage("No WoW window was detected for Scene automation.");
+      return;
+    }
+
+    setIsBusy(true);
+    try {
+      const result = await api.ensureObsWowScene({
+        windowTitle: selectedWindow.title,
+        executableName: selectedWindow.executableName ?? selectedWindow.processName,
+        windowClassName: selectedWindow.className,
+        captureMode,
+        captureCursor,
+        sceneName: "ArenaGodEyes Scene",
+        sourceName: "ArenaGodEyes WoW Capture",
+      });
+
+      setSceneSetupResult(result);
+      const latestObsStatus = await api.getObsStatus();
+      setObsStatus(latestObsStatus);
+      setStatusMessage(
+        result.sceneReady
+          ? `OBS scene prepared for ${selectedWindow.title}.`
+          : result.errorMessage ?? "OBS scene setup failed.",
+      );
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : "Failed to prepare OBS scene.");
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  async function refreshSceneAutomation() {
+    try {
+      const desktopBridge = window.arenaGodEyesDesktop;
+      if (!desktopBridge?.isDesktop) {
+        return;
+      }
+
+      const [obsLaunch, windows] = await Promise.all([
+        desktopBridge.ensureObsRunning(),
+        desktopBridge.listWowWindows(),
+      ]);
+
+      setObsLaunchStatus(obsLaunch);
+      setWowWindows(windows);
+
+      const latestObsStatus = await api.getObsStatus();
+      setObsStatus(latestObsStatus);
+
+      if (windows.length > 0 && latestObsStatus.isReachable) {
+        const preferredWindow =
+          sceneTarget === "wow-b"
+            ? windows[1] ?? windows[0]
+            : windows[0];
+        await handlePrepareObsScene(preferredWindow);
+        return;
+      }
+
+      if (windows.length === 0) {
+        setStatusMessage("WoW is not visible yet. Open the character window before testing Scene detection.");
+      } else if (!latestObsStatus.isReachable) {
+        setStatusMessage(latestObsStatus.errorMessage ?? "OBS is not reachable yet.");
+      }
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : "Failed to refresh Scene automation.");
     }
   }
 
@@ -1001,61 +1364,60 @@ export function HomePage() {
     }
   }
 
-  function openMatch(matchId: string) {
+  function toggleFavourite(matchId: string) {
+    setFavouriteMatchIds((current) =>
+      current.includes(matchId) ? current.filter((item) => item !== matchId) : [...current, matchId],
+    );
+  }
+
+  async function handleCopyPrompt() {
+    if (!promptText.trim()) {
+      setStatusMessage("Export a prompt first before copying it.");
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(promptText);
+      setStatusMessage("Prompt copied to clipboard.");
+    } catch {
+      setStatusMessage("Clipboard access failed. Export the prompt to file instead.");
+    }
+  }
+
+  function openMatch(matchId: string, tab: ReviewTab = "overview") {
     setSelectedMatchId(matchId);
     setActiveView("review");
-    setActiveReviewTab("overview");
+    setActiveReviewTab(tab);
+  }
+
+  function openContextualReviewTab(tab: ReviewTab, label: string) {
+    if (selectedMatchId) {
+      setActiveView("review");
+      setActiveReviewTab(tab);
+      return;
+    }
+
+    setActiveView("all");
+    setStatusMessage(`Choose a replay first to open ${label}.`);
   }
 
   function handleSidebarNavigation(view: AppView) {
-    if (view === "details") {
-      if (selectedMatchId) {
-        setActiveView("review");
-        setActiveReviewTab("details");
-      } else {
-        setActiveView("all");
-        setStatusMessage("Select a match first to open Details++.");
-      }
-
-      return;
-    }
-
-    if (view === "coach") {
-      if (selectedMatchId) {
-        setActiveView("review");
-        setActiveReviewTab("coach");
-      } else {
-        setActiveView("all");
-        setStatusMessage("Select a match first to open Coach Analysis.");
-      }
-
-      return;
-    }
-
-    if (view === "learning") {
-      if (selectedMatchId) {
-        setActiveView("review");
-        setActiveReviewTab("learning");
-      } else {
-        setActiveView("all");
-        setStatusMessage("Select a match first to open the Learning Database.");
-      }
-
-      return;
-    }
-
     setActiveView(view);
   }
 
   function renderLibraryScreen() {
+    const activeLibraryLabel =
+      librarySidebarItems.find((item) => item.key === activeView)?.label ?? "Match Library";
+    const visibleGroupEntries = Object.entries(groupedMatches).filter(([, groupMatches]) => groupMatches.length > 0);
+
     return (
       <div className="workspace-page">
         <header className="page-header">
           <div>
             <p className="eyebrow">Arena library</p>
-            <h1>{librarySidebarItems.find((item) => item.key === activeView)?.label ?? "Match Library"}</h1>
+            <h1>{activeLibraryLabel}</h1>
             <p className="page-copy">
-              Filter matches by bracket, keep clips and reviews together, and open a full replay workstation when a match needs deeper coaching.
+              Browse recorded replays like an archive. Each card should represent one match video with the details workspace behind it.
             </p>
           </div>
           <div className="page-actions">
@@ -1081,7 +1443,7 @@ export function HomePage() {
               onClick={() => setOnlyWithVideo((current) => !current)}
               type="button"
             >
-              With video
+              Recorded only
             </button>
             <button
               className={`filter-toggle ${onlyNeedsAnalysis ? "active" : ""}`}
@@ -1093,12 +1455,23 @@ export function HomePage() {
           </div>
           <div className="toolbar-stats">
             <span>{libraryStats.total} matches</span>
-            <span>{libraryStats.withVideo} with video</span>
+            <span>{libraryStats.withVideo} recorded replays</span>
+            <span>{libraryStats.favourites} favourites</span>
             <span>{pendingAnalyses} pending review</span>
           </div>
         </section>
 
-        {Object.entries(groupedMatches).map(([groupLabel, groupMatches]) =>
+        {visibleGroupEntries.length === 0 ? (
+          <div className="empty-state-card">
+            <Glyph name="camera" />
+            <strong>No recorded replays yet.</strong>
+            <p>
+              The main library is now focused on matches that already have a video. Finish one automatic recording or attach a local video to an imported match.
+            </p>
+          </div>
+        ) : null}
+
+        {visibleGroupEntries.map(([groupLabel, groupMatches]) =>
           groupMatches.length === 0 ? null : (
             <section key={groupLabel} className="library-group">
               <div className="section-header">
@@ -1107,11 +1480,9 @@ export function HomePage() {
               </div>
               <div className="match-grid">
                 {groupMatches.map((match) => (
-                  <button
+                  <article
                     key={match.matchId}
                     className={`match-card-shell ${selectedMatchId === match.matchId ? "active" : ""}`}
-                    onClick={() => openMatch(match.matchId)}
-                    type="button"
                   >
                     <div className="match-thumb-shell">
                       {match.thumbnailPath ? (
@@ -1122,7 +1493,7 @@ export function HomePage() {
                       ) : (
                         <div className="match-thumb-fallback">
                           <Glyph name="camera" />
-                          <span>No preview yet</span>
+                          <span>Replay video pending</span>
                         </div>
                       )}
                       <div className="match-badge-row">
@@ -1132,23 +1503,68 @@ export function HomePage() {
                         </span>
                         <span className="match-badge">{formatDuration(match.durationSeconds)}</span>
                       </div>
+                      <div className="match-hover-panel">
+                        <div className="match-hover-grid">
+                          <span>Map</span>
+                          <strong>{match.mapName}</strong>
+                          <span>Replay</span>
+                          <strong>{match.hasVideo ? "Video ready" : "No replay video yet"}</strong>
+                          <span>Combat log</span>
+                          <strong>{match.matchJsonPath ? "Imported" : "Missing"}</strong>
+                          <span>Analysis</span>
+                          <strong>{match.hasManualAnalysis ? "Imported" : "Pending"}</strong>
+                          <span>Markers</span>
+                          <strong>{match.timelineMarkerCount}</strong>
+                          <span>Date</span>
+                          <strong>{formatDateTimeLabel(match.startedAt)}</strong>
+                        </div>
+                        <div className="match-hover-actions">
+                          <button onClick={() => openMatch(match.matchId)} type="button">
+                            Open Review
+                          </button>
+                          <button onClick={() => openMatch(match.matchId, "details")} type="button">
+                            Details++
+                          </button>
+                          <button onClick={() => toggleFavourite(match.matchId)} type="button">
+                            {favouriteMatchIds.includes(match.matchId) ? "Unfavourite" : "Favourite"}
+                          </button>
+                        </div>
+                      </div>
                     </div>
                     <div className="match-card-body">
-                      <div className="match-card-topline">
-                        <strong>{match.playerName ?? "Unknown player"}</strong>
-                        <span>{formatDateLabel(match.startedAt)}</span>
+                      <div className="match-card-title-row">
+                        <span className="spec-token">{initials(match.playerSpecLabel ?? match.playerClassName ?? match.playerName)}</span>
+                        <div className="match-card-title-copy">
+                          <div className="match-card-topline">
+                            <strong>{match.playerName ?? "Unknown player"}</strong>
+                            <span>{formatDateLabel(match.startedAt)}</span>
+                          </div>
+                          <p className="muted-copy">
+                            {[match.playerClassName, match.playerSpecLabel].filter(Boolean).join(" / ") || "Class/spec pending"}
+                          </p>
+                        </div>
                       </div>
-                      <p className="muted-copy">
-                        {[match.playerClassName, match.playerSpecLabel].filter(Boolean).join(" / ") || "Class/spec pending"}
-                      </p>
                       <p className="muted-copy">{match.mapName}</p>
+                      {match.participants.length > 0 ? <MatchRosterStrip participants={match.participants} /> : null}
                       <div className="match-meta-row">
                         <span>{match.timelineMarkerCount} markers</span>
-                        <span>{match.hasVideo ? "Video ready" : "No video"}</span>
+                        <span>{match.hasVideo ? "Video ready" : "No replay video"}</span>
+                        <span>{match.matchJsonPath ? "JSON ready" : "No JSON"}</span>
                         <span>{match.hasManualAnalysis ? "Analysis ready" : "Awaiting analysis"}</span>
                       </div>
+                      <div className="match-card-actions">
+                        <button onClick={() => openMatch(match.matchId)} type="button">
+                          Open
+                        </button>
+                        <button onClick={() => openMatch(match.matchId, "coach")} type="button">
+                          Coach
+                        </button>
+                        <button onClick={() => toggleFavourite(match.matchId)} type="button">
+                          {favouriteMatchIds.includes(match.matchId) ? "Saved" : "Save"}
+                        </button>
+                      </div>
                     </div>
-                  </button>
+                  </article>
                 ))}
               </div>
             </section>
@@ -1159,7 +1575,11 @@ export function HomePage() {
           <div className="empty-state-card">
             <Glyph name="review" />
             <strong>No matches in this view yet.</strong>
-            <p>Import a combat log or sample pack to populate the library and start building the review archive.</p>
+            <p>
+              {activeView === "favourites"
+                ? "Favourite a replay from the library and it will stay pinned here."
+                : "Import a combat log or sample pack to populate the library and start building the review archive."}
+            </p>
           </div>
         ) : null}
       </div>
@@ -1174,7 +1594,7 @@ export function HomePage() {
             <p className="eyebrow">Settings</p>
             <h1>Desktop configuration</h1>
             <p className="page-copy">
-              Storage, detection, recording, and app preferences stay inside the desktop workflow. Local OBS internals stay hidden unless you explicitly reveal them.
+              Storage, detection, recording, and app preferences stay clean in product language. Technical endpoints remain hidden until you explicitly reveal the advanced area.
             </p>
           </div>
           <div className="page-actions">
@@ -1215,6 +1635,9 @@ export function HomePage() {
                     <button onClick={() => void chooseDirectoryFor("recordingDirectory", "Recording Location")} type="button">
                       Browse
                     </button>
+                    <button onClick={handleApplyStorageDefaults} type="button">
+                      Use Default
+                    </button>
                   </div>
                 }
               />
@@ -1230,6 +1653,9 @@ export function HomePage() {
                     <button onClick={() => void chooseDirectoryFor("recordingCacheDirectory", "Recording Cache Location")} type="button">
                       Browse
                     </button>
+                    <button onClick={handleApplyStorageDefaults} type="button">
+                      Use Default
+                    </button>
                   </div>
                 }
               />
@@ -1237,26 +1663,62 @@ export function HomePage() {
                 title="Maximum Disk Storage"
                 description="Limit the local recording footprint before cleanup policies start mattering."
                 controls={
-                  <input
-                    className="compact-input"
-                    type="number"
-                    value={settings.maxDiskStorageGb}
-                    onChange={(event) => updateSetting("maxDiskStorageGb", Number(event.target.value) || 0)}
-                  />
+                  <div className="inline-field-group inline-compact-group">
+                    <input
+                      className="compact-input"
+                      type="number"
+                      value={settings.maxDiskStorageGb}
+                      onChange={(event) => updateSetting("maxDiskStorageGb", Number(event.target.value) || 0)}
+                    />
+                    <button onClick={handleResetStorageLimit} type="button">
+                      Reset
+                    </button>
+                  </div>
+                }
+              />
+              <SettingsRow
+                title="Current Disk Usage"
+                description="Live footprint from recordings plus temporary staged capture files."
+                controls={
+                  <div className="storage-usage-card">
+                    <div className="storage-usage-meta">
+                      <strong>{formatStorageUsedLine(storageOverview, settings.maxDiskStorageGb)}</strong>
+                      <span>
+                        {storageOverview
+                          ? `${storageOverview.recordingFileCount} recording files and ${storageOverview.cacheFileCount} cache files detected`
+                          : "Usage information loads from the backend workspace."}
+                      </span>
+                    </div>
+                    <div className="storage-usage-bar" aria-hidden="true">
+                      <span
+                        className="storage-usage-bar-fill"
+                        style={{ width: `${storageOverview?.usagePercent ?? 0}%` }}
+                      />
+                    </div>
+                  </div>
                 }
               />
               <SettingsRow
                 title="Maximum Match Files"
                 description="Cap how many stored matches are kept before old sessions get pruned later."
                 controls={
-                  <input
-                    className="compact-input"
-                    type="number"
-                    value={settings.maxMatchFiles}
-                    onChange={(event) => updateSetting("maxMatchFiles", Number(event.target.value) || 0)}
-                  />
+                  <div className="inline-field-group inline-compact-group">
+                    <input
+                      className="compact-input"
+                      type="number"
+                      value={settings.maxMatchFiles}
+                      onChange={(event) => updateSetting("maxMatchFiles", Number(event.target.value) || 0)}
+                    />
+                    <button onClick={handleResetMatchFiles} type="button">
+                      Reset
+                    </button>
+                  </div>
                 }
               />
+              <div className="settings-inline-note">
+                <span>Default recordings folder: {storageOverview?.defaultRecordingDirectory ?? "Loading..."}</span>
+                <span>Default cache folder: {storageOverview?.defaultRecordingCacheDirectory ?? "Loading..."}</span>
+              </div>
             </>
           ) : null}
 
@@ -1429,33 +1891,26 @@ export function HomePage() {
                 }
               />
               <SettingsRow
-                title="OBS Recording Integration"
-                description="Use OBS as the recording engine without surfacing localhost and port details in normal settings."
+                title="Recording Mode"
+                description="Use OBS for the MVP recording workflow while keeping the UI product-facing."
                 controls={
-                  <label className="switch-pill">
-                    <input
-                      checked={settings.enableObsRecording}
-                      onChange={(event) => updateSetting("enableObsRecording", event.target.checked)}
-                      type="checkbox"
-                    />
-                    <span>{settings.enableObsRecording ? "Enabled" : "Disabled"}</span>
-                  </label>
+                  <div className="inline-stat-group">
+                    <span className="info-pill">OBS WebSocket</span>
+                    <span className="info-pill">Manual fallback later</span>
+                  </div>
                 }
               />
               <SettingsRow
-                title="OBS Health"
-                description="Check connection and test recording state from the product layer."
+                title="Auto Recording"
+                description="Keep match recordings aligned with arena start and stop behavior."
                 controls={
-                  <div className="inline-button-group">
-                    <button onClick={handleTestObsConnection} disabled={isBusy} type="button">
-                      Test Connection
-                    </button>
-                    <button onClick={handleStartObsRecording} disabled={isBusy} type="button">
-                      Start Test Recording
-                    </button>
-                    <button onClick={handleStopObsRecording} disabled={isBusy} type="button">
-                      Stop Test Recording
-                    </button>
+                  <div className="inline-stat-group">
+                    <span className={`info-pill ${settings.enableRecording ? "good" : ""}`}>
+                      {settings.enableRecording ? "Auto start ready" : "Recording disabled"}
+                    </span>
+                    <span className="info-pill">
+                      {settings.trackSkirmishMatches ? "Skirmish capture on" : "Skirmish capture off"}
+                    </span>
                   </div>
                 }
               />
@@ -1471,6 +1926,83 @@ export function HomePage() {
                     </span>
                   </div>
                 }
+              />
+            </>
+          ) : null}
+
+          {activeSettingsTab === "obs" ? (
+            <>
+              <SettingsRow
+                title="OBS status"
+                description="Normal product view for recorder health without showing host and port values."
+                controls={
+                  <div className="inline-stat-group">
+                    <span className={`info-pill ${obsStatus?.isReachable ? "good" : ""}`}>
+                      {obsStatus?.isReachable ? "OBS connected" : "OBS disconnected"}
+                    </span>
+                    <span className="info-pill">{settings.enableObsRecording ? "Recording enabled" : "Recording off"}</span>
+                  </div>
+                }
+              />
+              <SettingsRow
+                title="Connection actions"
+                description="Validate the recorder from the product layer."
+                controls={
+                  <div className="inline-button-group">
+                    <button onClick={handleTestObsConnection} disabled={isBusy} type="button">
+                      Test connection
+                    </button>
+                    <button onClick={handleStartObsRecording} disabled={isBusy} type="button">
+                      Start test recording
+                    </button>
+                    <button onClick={handleStopObsRecording} disabled={isBusy} type="button">
+                      Stop test recording
+                    </button>
+                  </div>
+                }
+              />
+            </>
+          ) : null}
+
+          {activeSettingsTab === "video" ? (
+            <>
+              <SettingsRow
+                title="Thumbnail Second"
+                description="Frame position used when creating replay card previews."
+                controls={
+                  <input
+                    className="compact-input"
+                    type="number"
+                    value={settings.videoThumbnailSecond}
+                    onChange={(event) => updateSetting("videoThumbnailSecond", Number(event.target.value) || 0)}
+                  />
+                }
+              />
+              <SettingsRow
+                title="Replay quality target"
+                description="Keep spell readability and UI clarity strong during review."
+                controls={
+                  <div className="inline-stat-group">
+                    <span className="info-pill">720p</span>
+                    <span className="info-pill good">1080p</span>
+                    <span className="info-pill">1440p</span>
+                  </div>
+                }
+              />
+            </>
+          ) : null}
+
+          {activeSettingsTab === "audio" ? (
+            <>
+              <SettingsRow
+                title="Desktop audio"
+                description="Keep arena sound cues in the local replay workflow."
+                controls={<div className="info-pill good">Enabled for review</div>}
+              />
+              <SettingsRow
+                title="Microphone"
+                description="Reserve mic capture for commentary and future coaching clips."
+                controls={<div className="info-pill">Future configurable source</div>}
               />
             </>
           ) : null}
@@ -1508,7 +2040,7 @@ export function HomePage() {
                       showSensitiveValues
                         ? settings.obsPassword ?? ""
                         : settings.obsPassword
-                          ? "••••••••"
+                          ? "********"
                           : "Not configured"
                     }
                   />
@@ -1559,6 +2091,7 @@ export function HomePage() {
   }
 
   function renderSceneScreen() {
+    const selectedWowWindow = getSelectedWowWindow();
     const previewSource = selectedMatch?.match.videoLocalPath ?? selectedMatch?.match.thumbnailPath ?? null;
 
     return (
@@ -1568,10 +2101,16 @@ export function HomePage() {
             <p className="eyebrow">Scene</p>
             <h1>Capture source control</h1>
             <p className="page-copy">
-              Pick which WoW session this desktop workflow should prefer, then tune capture source, video quality, and audio preferences without exposing low-level OBS network details.
+              Pick the active WoW target, configure source capture, and keep video and audio choices operational. This screen stays focused on recording, not coaching.
             </p>
           </div>
           <div className="page-actions">
+            <button onClick={() => void refreshSceneAutomation()} disabled={isBusy} type="button">
+              Refresh Scene
+            </button>
+            <button onClick={() => void handlePrepareObsScene()} disabled={isBusy || !selectedWowWindow} type="button">
+              Prepare OBS Scene
+            </button>
             <button onClick={handleStartObsRecording} disabled={isBusy} type="button">
               Start Recording
             </button>
@@ -1582,7 +2121,7 @@ export function HomePage() {
         </header>
 
         <section className="scene-preview-card">
-          <div className="scene-preview-frame">
+          <div className={previewSource ? "scene-preview-frame" : "scene-detection-banner"}>
             {previewSource ? (
               selectedMatch?.match.videoLocalPath ? (
                 <video
@@ -1598,10 +2137,14 @@ export function HomePage() {
                 />
               )
             ) : (
-              <div className="scene-empty">
+              <div className="scene-empty compact">
                 <Glyph name="scene" />
-                <strong>No current source preview yet.</strong>
-                <p>Attach a local video or process a recorded match to use this area as the desktop capture preview surface.</p>
+                <strong>{selectedWowWindow ? selectedWowWindow.title : "WoW capture target not detected yet."}</strong>
+                <p>
+                  {selectedWowWindow
+                    ? `Detected ${selectedWowWindow.executableName ?? selectedWowWindow.processName}. The app can prepare capture, but live embedded preview is not implemented yet.`
+                    : "Open a visible WoW window and the Scene tab will detect it here."}
+                </p>
               </div>
             )}
           </div>
@@ -1635,13 +2178,30 @@ export function HomePage() {
                 ))}
               </div>
               <div className="scene-option-card">
+                <strong>Automation status</strong>
+                <div className="scene-stack-list">
+                  <span className={`info-pill ${wowWindows.length > 0 ? "good" : ""}`}>
+                    {wowWindows.length > 0 ? `${wowWindows.length} WoW window(s) detected` : "WoW window not detected"}
+                  </span>
+                  <span className={`info-pill ${obsLaunchStatus?.detected ? "good" : ""}`}>
+                    {obsLaunchStatus?.detected ? "OBS process detected" : "OBS process pending"}
+                  </span>
+                  <span className={`info-pill ${obsStatus?.isReachable ? "good" : ""}`}>
+                    {obsStatus?.isReachable ? "OBS connected" : "OBS not connected"}
+                  </span>
+                  <span className={`info-pill ${sceneSetupResult?.sceneReady ? "good" : ""}`}>
+                    {sceneSetupResult?.sceneReady ? "Scene prepared" : "Scene not prepared"}
+                  </span>
+                </div>
                 <strong>Capture mode</strong>
                 <div className="segmented-row">
                   {(["game", "window", "monitor"] as CaptureMode[]).map((mode) => (
                     <button
                       key={mode}
                       className={captureMode === mode ? "active" : ""}
-                      onClick={() => setCaptureMode(mode)}
+                      onClick={() => {
+                        setCaptureMode(mode);
+                      }}
                       type="button"
                     >
                       {titleize(mode)}
@@ -1656,6 +2216,20 @@ export function HomePage() {
                   />
                   <span>{captureCursor ? "Capture cursor" : "Hide cursor"}</span>
                 </label>
+                <div className="scene-stack-list">
+                  <span className="info-pill">
+                    Selected target: {selectedWowWindow?.title ?? (sceneTarget === "auto" ? "Auto" : titleize(sceneTarget))}
+                  </span>
+                  <span className="info-pill">{settings.enableRecording ? "Recording ready" : "Recording disabled"}</span>
+                  {selectedWowWindow ? (
+                    <span className="info-pill good">
+                      {selectedWowWindow.title} / {selectedWowWindow.className}
+                    </span>
+                  ) : null}
+                  {sceneSetupResult?.matchedWindow ? (
+                    <span className="info-pill good">OBS source: {sceneSetupResult.matchedWindow}</span>
+                  ) : null}
+                </div>
               </div>
             </div>
           ) : null}
@@ -1665,17 +2239,48 @@ export function HomePage() {
               <SettingsRow
                 title="Frame Rate"
                 description="Keep the recording surface aligned with arena readability."
-                controls={<div className="info-pill">60 FPS preferred</div>}
+                controls={
+                  <div className="segmented-row compact-segmented">
+                    <button className="active" type="button">
+                      60 FPS
+                    </button>
+                    <button type="button">30 FPS</button>
+                  </div>
+                }
               />
               <SettingsRow
                 title="Resolution"
                 description="Target a clear replay feed without bloating local storage."
-                controls={<div className="info-pill">1080p desktop target</div>}
+                controls={
+                  <div className="inline-stat-group">
+                    <span className="info-pill">720p</span>
+                    <span className="info-pill good">1080p</span>
+                    <span className="info-pill">1440p</span>
+                  </div>
+                }
               />
               <SettingsRow
                 title="Quality"
                 description="Preserve spell clarity and UI legibility during post-match review."
-                controls={<div className="info-pill">High quality local replay</div>}
+                controls={
+                  <div className="inline-stat-group">
+                    <span className="info-pill">Low</span>
+                    <span className="info-pill">Medium</span>
+                    <span className="info-pill good">High</span>
+                  </div>
+                }
+              />
+              <SettingsRow
+                title="Encoder"
+                description="Stay ready for local GPU-backed recording workflows."
+                controls={
+                  <div className="inline-stat-group">
+                    <span className="info-pill good">NVIDIA NVENC</span>
+                    <span className="info-pill">AMD</span>
+                    <span className="info-pill">Intel</span>
+                    <span className="info-pill">Software</span>
+                  </div>
+                }
               />
             </div>
           ) : null}
@@ -1685,7 +2290,7 @@ export function HomePage() {
               <SettingsRow
                 title="Desktop Audio"
                 description="Keep arena sound cues available in local playback."
-                controls={<div className="info-pill">Enabled in recording workflow</div>}
+                controls={<div className="info-pill good">Enabled in recording workflow</div>}
               />
               <SettingsRow
                 title="Microphone"
@@ -1693,9 +2298,14 @@ export function HomePage() {
                 controls={<div className="info-pill">Future configurable source</div>}
               />
               <SettingsRow
-                title="Noise handling"
-                description="Audio cleanup remains part of the future recording refinement path."
-                controls={<div className="info-pill">Suppression later</div>}
+                title="Audio cleanup"
+                description="Keep the operational hooks visible for suppression and mono input."
+                controls={
+                  <div className="inline-stat-group">
+                    <span className="info-pill">Suppression later</span>
+                    <span className="info-pill">Mono input later</span>
+                  </div>
+                }
               />
             </div>
           ) : null}
@@ -1712,6 +2322,11 @@ export function HomePage() {
             <Glyph name="review" />
             <strong>Select a match from the library.</strong>
             <p>Open any bracket view in the sidebar and launch a replay from the match grid to enter the review workstation.</p>
+            <div className="empty-state-actions">
+              <button onClick={() => setActiveView("all")} type="button">
+                Open Library
+              </button>
+            </div>
           </div>
         </div>
       );
@@ -1722,23 +2337,24 @@ export function HomePage() {
         <header className="page-header review-header">
           <div>
             <p className="eyebrow">Review workstation</p>
-            <h1>
-              {selectedMatch.match.playerName ?? "Unknown player"} / {selectedMatch.match.playerClassName ?? "Unknown class"}
-              {selectedMatch.match.playerSpecLabel ? ` / ${selectedMatch.match.playerSpecLabel}` : ""}
-            </h1>
-            <p className="page-copy">
-              {selectedMatch.match.bracket} / {selectedMatch.match.mapName} / {formatDuration(selectedMatch.match.durationSeconds)}
-            </p>
+            <h1>{selectedMatch.match.playerName ?? "Unknown player"}</h1>
+            <div className="review-topline-row">
+              <span className="info-pill">{selectedMatch.match.playerSpecLabel ?? selectedMatch.match.playerClassName ?? "Spec pending"}</span>
+              <span className="info-pill">{selectedMatch.match.bracket}</span>
+              <span className={`info-pill tone-${resultTone(selectedMatch.match.resultForPlayer)}`}>
+                {selectedMatch.match.resultForPlayer ?? "Pending"}
+              </span>
+              <span className="info-pill">{selectedMatch.match.mapName}</span>
+              <span className="info-pill">{formatDuration(selectedMatch.match.durationSeconds)}</span>
+              <span className="info-pill">{formatDateTimeLabel(selectedMatch.match.startedAt)}</span>
+            </div>
           </div>
           <div className="page-actions">
+            <button onClick={() => setActiveView("all")} type="button">
+              Back to Library
+            </button>
             <button onClick={handleAttachVideo} disabled={isBusy} type="button">
               Attach Video
-            </button>
-            <button onClick={handleProcessVideo} disabled={isBusy || !selectedMatch.match.videoLocalPath} type="button">
-              Process Video
-            </button>
-            <button onClick={handleGenerateReviewClips} disabled={isBusy || !selectedMatch.match.videoLocalPath} type="button">
-              Generate Clips
             </button>
           </div>
         </header>
@@ -1773,6 +2389,7 @@ export function HomePage() {
           </div>
 
           <aside className="review-summary-column">
+            <MatchRosterPanel participants={selectedMatch.participants} />
             <article className="summary-card">
               <div className="summary-card-topline">
                 <strong>Match status</strong>
@@ -1824,6 +2441,27 @@ export function HomePage() {
                 </div>
               </article>
             ) : null}
+
+            <article className="summary-card">
+              <div className="summary-card-topline">
+                <strong>Context shortcuts</strong>
+                <span className="tone-chip tone-stone">Replay level</span>
+              </div>
+              <div className="summary-action-grid">
+                <button onClick={() => openContextualReviewTab("timeline", "Timeline")} type="button">
+                  Timeline
+                </button>
+                <button onClick={() => openContextualReviewTab("details", "Details++")} type="button">
+                  Details++
+                </button>
+                <button onClick={() => openContextualReviewTab("coach", "Coach")} type="button">
+                  Coach
+                </button>
+                <button onClick={() => openContextualReviewTab("chatgpt", "ChatGPT")} type="button">
+                  ChatGPT
+                </button>
+              </div>
+            </article>
           </aside>
         </section>
 
@@ -1842,6 +2480,40 @@ export function HomePage() {
 
         {activeReviewTab === "overview" ? (
           <div className="content-grid two-column">
+            <div className="stack-card">
+              <div className="section-header">
+                <h2>Match summary</h2>
+                <span>{selectedMatch.insights.length}</span>
+              </div>
+              <div className="review-summary-grid">
+                <article className="intel-card">
+                  <div className="intel-card-topline">
+                    <strong>Replay package</strong>
+                    <span className="tone-chip tone-stone">Library context</span>
+                  </div>
+                  <p>{selectedMatch.match.bracket} on {selectedMatch.match.mapName}</p>
+                  <p className="muted-copy">
+                    Video {selectedMatch.match.hasVideo ? "linked" : "missing"} / Analysis {selectedMatch.match.hasManualAnalysis ? "imported" : "pending"}
+                  </p>
+                </article>
+                <article className="intel-card">
+                  <div className="intel-card-topline">
+                    <strong>Review readiness</strong>
+                    <span className="tone-chip tone-stone">Workspace</span>
+                  </div>
+                  <p>{selectedMatch.timelineMarkers.length} markers connected to the current replay.</p>
+                  <p className="muted-copy">{selectedMatch.videoClips.length} clips and {selectedMatch.validationTargets.length} validation targets available.</p>
+                </article>
+                <article className="intel-card">
+                  <div className="intel-card-topline">
+                    <strong>Roster context</strong>
+                    <span className="tone-chip tone-stone">{selectedMatch.participants.length} players</span>
+                  </div>
+                  <p>One replay package, one video, and a full roster context for teammate and enemy coaching.</p>
+                  <p className="muted-copy">Use the timeline and coach tabs to connect timestamps with decisions from every participant involved.</p>
+                </article>
+              </div>
+            </div>
             <div className="stack-card">
               <div className="section-header">
                 <h2>Structured insights</h2>
@@ -1868,6 +2540,54 @@ export function HomePage() {
                   ))
                 )}
               </div>
+            </div>
+          </div>
+        ) : null}
+
+        {activeReviewTab === "video" ? (
+          <div className="content-grid two-column">
+            <div className="stack-card">
+              <div className="section-header">
+                <h2>Video workflow</h2>
+                <span>{selectedMatch.match.hasVideo ? "Attached" : "Pending"}</span>
+              </div>
+              <div className="review-action-list">
+                <button onClick={handleAttachVideo} disabled={isBusy} type="button">
+                  Attach local video
+                </button>
+                <button onClick={handleProcessVideo} disabled={isBusy || !selectedMatch.match.videoLocalPath} type="button">
+                  Process video
+                </button>
+                <button onClick={handleGenerateReviewClips} disabled={isBusy || !selectedMatch.match.videoLocalPath} type="button">
+                  Create clips
+                </button>
+              </div>
+            </div>
+            <div className="stack-card">
+              <div className="section-header">
+                <h2>Replay assets</h2>
+                <span>Current match</span>
+              </div>
+              <div className="asset-list">
+                <span>Video path: {selectedMatch.match.videoLocalPath ?? "Not linked yet"}</span>
+                <span>Thumbnail: {selectedMatch.match.thumbnailPath ?? "Not generated yet"}</span>
+                <span>Resolution: {selectedMatch.match.videoResolution ?? "Unknown"}</span>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {activeReviewTab === "timeline" ? (
+          <div className="content-grid two-column">
+            <div className="stack-card">
+              <div className="section-header">
+                <h2>Timeline markers</h2>
+                <span>{selectedMatch.timelineMarkers.length}</span>
+              </div>
+              <TimelineMarkerRail
+                durationSeconds={selectedMatch.match.durationSeconds}
+                markers={selectedMatch.timelineMarkers}
+              />
             </div>
             <div className="stack-card">
               <div className="section-header">
@@ -1908,6 +2628,26 @@ export function HomePage() {
               <h2>Spell intelligence</h2>
               <span>{categorizedSpells.length} tracked spells</span>
             </div>
+            {selectedMatch.metricSummary ? (
+              <div className="metric-kpi-grid">
+                <article className="kpi-card">
+                  <span>Total damage</span>
+                  <strong>{formatLargeNumber(selectedMatch.metricSummary.totalDamage)}</strong>
+                </article>
+                <article className="kpi-card">
+                  <span>Total healing</span>
+                  <strong>{formatLargeNumber(selectedMatch.metricSummary.totalHealing)}</strong>
+                </article>
+                <article className="kpi-card">
+                  <span>Interrupts</span>
+                  <strong>{selectedMatch.metricSummary.interruptCount}</strong>
+                </article>
+                <article className="kpi-card">
+                  <span>Deaths</span>
+                  <strong>{selectedMatch.metricSummary.deathCount}</strong>
+                </article>
+              </div>
+            ) : null}
             <div className="intel-grid three-up">
               {categorizedSpells.length === 0 ? (
                 <p className="muted-copy">No spell metrics persisted yet.</p>
@@ -1942,61 +2682,50 @@ export function HomePage() {
             </div>
             <div className="stack-card">
               <div className="section-header">
-                <h2>Benchmark audit</h2>
-                <span>{selectedMatch.benchmarkComparisons.length}</span>
+                <h2>Learning and benchmark context</h2>
+                <span>{selectedMatch.benchmarkComparisons.length + selectedMatch.coachSkills.length}</span>
               </div>
-              <div className="intel-grid two-up">
-                {selectedMatch.benchmarkComparisons.length === 0 ? (
-                  <p className="muted-copy">No benchmark comparisons yet.</p>
-                ) : (
-                  selectedMatch.benchmarkComparisons.map((item) => (
-                    <BenchmarkComparisonCard
-                      key={`${item.scope}-${item.metric}-${item.category}`}
-                      item={item}
-                    />
-                  ))
-                )}
-              </div>
-            </div>
-          </div>
-        ) : null}
-
-        {activeReviewTab === "learning" ? (
-          <div className="content-grid two-column">
-            <div className="stack-card">
-              <div className="section-header">
-                <h2>Coach knowledge</h2>
-                <span>{selectedMatch.coachKnowledgeParameters.length}</span>
-              </div>
-              <div className="intel-grid two-up">
-                {selectedMatch.coachKnowledgeParameters.length === 0 ? (
-                  <p className="muted-copy">No accumulated knowledge parameters yet.</p>
-                ) : (
-                  selectedMatch.coachKnowledgeParameters.map((item) => (
+              <div className="coach-context-stack">
+                <div className="intel-grid two-up">
+                  {selectedMatch.benchmarkComparisons.length === 0 ? (
+                    <p className="muted-copy">No benchmark comparisons yet.</p>
+                  ) : (
+                    selectedMatch.benchmarkComparisons.map((item) => (
+                      <BenchmarkComparisonCard
+                        key={`${item.scope}-${item.metric}-${item.category}`}
+                        item={item}
+                      />
+                    ))
+                  )}
+                </div>
+                <div className="intel-grid two-up">
+                  {selectedMatch.coachKnowledgeParameters.map((item) => (
                     <KnowledgeCard
                       key={`${item.scope}-${item.className ?? "none"}-${item.specLabel ?? "none"}-${item.metric}`}
                       item={item}
                     />
-                  ))
-                )}
-              </div>
-            </div>
-            <div className="stack-card">
-              <div className="section-header">
-                <h2>Coach skills</h2>
-                <span>{selectedMatch.coachSkills.length}</span>
-              </div>
-              <div className="intel-grid two-up">
-                {selectedMatch.coachSkills.length === 0 ? (
-                  <p className="muted-copy">No accumulated coach skills yet.</p>
-                ) : (
-                  selectedMatch.coachSkills.map((item) => (
+                  ))}
+                  {selectedMatch.coachSkills.map((item) => (
                     <SkillCard
                       key={`${item.scope}-${item.className ?? "none"}-${item.specLabel ?? "none"}-${item.area}-${item.goal}`}
                       item={item}
                     />
-                  ))
-                )}
+                  ))}
+                </div>
+                <article className="action-card">
+                  <span>Learning saves</span>
+                  <div className="review-action-list">
+                    <button disabled type="button">
+                      Save mistake as learning note
+                    </button>
+                    <button disabled type="button">
+                      Save burst window pattern
+                    </button>
+                    <button disabled type="button">
+                      Save matchup benchmark
+                    </button>
+                  </div>
+                </article>
               </div>
             </div>
           </div>
@@ -2015,10 +2744,21 @@ export function HomePage() {
                 onChange={(event) => setManualResponseText(event.target.value)}
               />
             </label>
+            <div className="action-card">
+              <span>Saved analysis</span>
+              <p className="muted-copy">
+                {selectedMatch.manualAnalysisText
+                  ? "This replay already has imported analysis saved locally."
+                  : "No manual ChatGPT analysis imported yet."}
+              </p>
+            </div>
             <div className="action-card full-span">
               <div className="page-actions">
                 <button onClick={handleExportPrompt} disabled={isBusy} type="button">
                   Export Prompt for ChatGPT
+                </button>
+                <button onClick={() => void handleCopyPrompt()} disabled={isBusy || !promptText.trim()} type="button">
+                  Copy Prompt
                 </button>
                 <button
                   onClick={handleImportManualAnalysis}
@@ -2028,6 +2768,71 @@ export function HomePage() {
                   Import ChatGPT Response
                 </button>
               </div>
+            </div>
+          </div>
+        ) : null}
+
+        {activeReviewTab === "export" ? (
+          <div className="content-grid two-column">
+            <div className="stack-card">
+              <div className="section-header">
+                <h2>Export tools</h2>
+                <span>Selected replay</span>
+              </div>
+              <div className="review-action-list">
+                <button onClick={handleExportPrompt} disabled={isBusy} type="button">
+                  Export ChatGPT prompt
+                </button>
+                <button onClick={handleGenerateReviewClips} disabled={isBusy || !selectedMatch.match.videoLocalPath} type="button">
+                  Generate review clips
+                </button>
+                <button onClick={handleProcessVideo} disabled={isBusy || !selectedMatch.match.videoLocalPath} type="button">
+                  Process replay video
+                </button>
+              </div>
+            </div>
+            <div className="stack-card">
+              <div className="section-header">
+                <h2>Import tools</h2>
+                <span>Manual workflow</span>
+              </div>
+              <div className="review-action-list">
+                <button onClick={() => setActiveReviewTab("chatgpt")} type="button">
+                  Open ChatGPT tab
+                </button>
+                <button onClick={handleAttachVideo} disabled={isBusy} type="button">
+                  Attach local video
+                </button>
+              </div>
+              <div className="asset-list">
+                <span>Match JSON path: {selectedMatch.match.matchJsonPath}</span>
+                <span>Video path: {selectedMatch.match.videoLocalPath ?? "Not linked yet"}</span>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {activeReviewTab === "raw" ? (
+          <div className="stack-card">
+            <div className="section-header">
+              <h2>Raw event stream</h2>
+              <span>{selectedMatch.timelineMarkers.length} replay events</span>
+            </div>
+            <div className="raw-event-list">
+              {selectedMatch.timelineMarkers.length === 0 ? (
+                <p className="muted-copy">No timeline events imported yet.</p>
+              ) : (
+                selectedMatch.timelineMarkers.map((marker) => (
+                  <article
+                    key={`${marker.source}-${marker.videoSecond}-${marker.label}`}
+                    className="raw-event-card"
+                  >
+                    <strong>{marker.label}</strong>
+                    <span>{formatDuration(marker.videoSecond)} / {titleize(marker.category)} / {titleize(marker.source)}</span>
+                    <p>{marker.description}</p>
+                  </article>
+                ))
+              )}
             </div>
           </div>
         ) : null}
@@ -2043,6 +2848,23 @@ export function HomePage() {
   }
 
   function renderClipsScreen() {
+    if (!selectedMatchId) {
+      return (
+        <div className="workspace-page">
+          <div className="empty-state-card tall-empty">
+            <Glyph name="clips" />
+            <strong>Choose a replay first.</strong>
+            <p>Open a match from the Library to see or generate replay clips in context.</p>
+            <div className="empty-state-actions">
+              <button onClick={() => setActiveView("all")} type="button">
+                Open Library
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="workspace-page">
         <header className="page-header">
@@ -2077,6 +2899,58 @@ export function HomePage() {
               <p>Process a selected match video and generate clips from markers, insights, and validation targets.</p>
             </div>
           )}
+        </div>
+      </div>
+    );
+  }
+
+  function renderDiagnosticsScreen() {
+    return (
+      <div className="workspace-page narrow-page">
+        <header className="page-header">
+          <div>
+            <p className="eyebrow">Diagnostics</p>
+            <h1>App-level logs and diagnostics</h1>
+            <p className="page-copy">
+              This area is for ArenaGodEyes health, recorder diagnostics, and local setup signals. Match-level exports stay inside the selected replay workspace.
+            </p>
+          </div>
+          <div className="page-actions">
+            <button onClick={handleValidateSettings} disabled={isBusy} type="button">
+              Validate setup
+            </button>
+            <button onClick={handleTestObsConnection} disabled={isBusy} type="button">
+              Test OBS
+            </button>
+          </div>
+        </header>
+        <div className="verification-grid">
+          <article className="summary-card">
+            <div className="summary-card-topline">
+              <strong>Storage</strong>
+              <span className="tone-chip tone-stone">{settings.recordingDirectory ? "Configured" : "Pending"}</span>
+            </div>
+            <p>{settings.recordingDirectory ?? "Recording folder not configured yet."}</p>
+          </article>
+          <article className="summary-card">
+            <div className="summary-card-topline">
+              <strong>Recorder</strong>
+              <span className={`tone-chip tone-${obsStatus?.isReachable ? "success" : "warning"}`}>
+                {obsStatus?.isReachable ? "Ready" : "Attention"}
+              </span>
+            </div>
+            <p>{obsStatus?.errorMessage ?? obsStatus?.outputPath ?? "No recorder diagnostics yet."}</p>
+            {bootstrapStatus?.pendingActions.includes("restart_obs") ? (
+              <p className="muted-copy">Restart OBS once so the local WebSocket server can come up on port 4455.</p>
+            ) : null}
+          </article>
+          <article className="summary-card">
+            <div className="summary-card-topline">
+              <strong>Backend</strong>
+              <span className="tone-chip tone-success">Online</span>
+            </div>
+            <p>{systemStatus?.status ?? "Waiting for backend"}</p>
+          </article>
         </div>
       </div>
     );
@@ -2127,6 +3001,9 @@ export function HomePage() {
               </span>
             </div>
             <p>{obsStatus?.errorMessage ?? obsStatus?.outputPath ?? "Connection test pending."}</p>
+            {bootstrapStatus?.pendingActions.length ? (
+              <p className="muted-copy">Pending bootstrap actions: {bootstrapStatus.pendingActions.join(", ")}</p>
+            ) : null}
           </article>
         </div>
         {validation ? (
@@ -2159,6 +3036,8 @@ export function HomePage() {
         return renderSettingsScreen();
       case "scene":
         return renderSceneScreen();
+      case "diagnostics":
+        return renderDiagnosticsScreen();
       case "verify":
         return renderVerifyScreen();
       default:
@@ -2177,6 +3056,7 @@ export function HomePage() {
           </div>
         </div>
 
+        <div className="sidebar-section-label">Library</div>
         <nav className="sidebar-nav">
           {librarySidebarItems.map((item) => (
             <button
@@ -2193,19 +3073,12 @@ export function HomePage() {
 
         <div className="sidebar-divider" />
 
+        <div className="sidebar-section-label">Workspace</div>
         <nav className="sidebar-nav secondary">
           {systemSidebarItems.map((item) => (
             <button
               key={item.key}
-              className={`sidebar-item ${
-                activeView === item.key ||
-                (activeView === "review" &&
-                  ((item.key === "details" && activeReviewTab === "details") ||
-                    (item.key === "coach" && activeReviewTab === "coach") ||
-                    (item.key === "learning" && activeReviewTab === "learning")))
-                  ? "active"
-                  : ""
-              }`}
+              className={`sidebar-item ${activeView === item.key ? "active" : ""}`}
               onClick={() => handleSidebarNavigation(item.key)}
               type="button"
             >

@@ -37,6 +37,33 @@ export type SettingsValidationResult = {
   messages: string[];
 };
 
+export type FirstRunBootstrapStatus = {
+  wowDetected: boolean;
+  addonInstalled: boolean;
+  obsInstalled: boolean;
+  obsWebSocketConfigured: boolean;
+  recordingDirectoriesReady: boolean;
+  appliedFixes: string[];
+  pendingActions: string[];
+};
+
+export type StorageOverview = {
+  recordingDirectory: string;
+  recordingCacheDirectory: string;
+  defaultRecordingDirectory: string;
+  defaultRecordingCacheDirectory: string;
+  recordingDirectoryBytes: number;
+  recordingCacheDirectoryBytes: number;
+  totalBytes: number;
+  recordingFileCount: number;
+  cacheFileCount: number;
+  totalGigabytes: number;
+  maxDiskStorageGb: number;
+  usagePercent: number | null;
+  recordingDirectoryExists: boolean;
+  recordingCacheDirectoryExists: boolean;
+};
+
 export type MatchLibraryItem = {
   matchId: string;
   startedAt: string;
@@ -56,6 +83,15 @@ export type MatchLibraryItem = {
   recordingStatus: string | null;
   videoDurationSeconds: number | null;
   videoResolution: string | null;
+  participants: MatchParticipantSummaryItem[];
+};
+
+export type MatchParticipantSummaryItem = {
+  name: string;
+  teamId: number;
+  className: string | null;
+  specLabel: string | null;
+  isTrackedPlayer: boolean;
 };
 
 export type TimelineMarkerItem = {
@@ -83,6 +119,23 @@ export type MatchReviewDetails = {
   insights: AnalysisInsightItem[];
   validationTargets: ValidationTargetItem[];
   videoClips: VideoClipItem[];
+  participants: MatchParticipantReviewItem[];
+};
+
+export type MatchParticipantReviewItem = {
+  guid: string;
+  name: string;
+  realm: string | null;
+  region: string | null;
+  teamId: number;
+  className: string | null;
+  specLabel: string | null;
+  personalRating: number;
+  highestPvpTier: number;
+  isTrackedPlayer: boolean;
+  profileSnapshot: SpecPerformanceSnapshotItem | null;
+  coachKnowledgeParameters: CoachKnowledgeParameterItem[];
+  coachSkills: CoachSkillItem[];
 };
 
 export type MatchMetricSummaryItem = {
@@ -242,6 +295,15 @@ export type ObsConnectionStatus = {
   isRecording: boolean;
   obsVersion: string | null;
   outputPath: string | null;
+  errorMessage: string | null;
+};
+
+export type ObsSceneSetupResult = {
+  isObsReachable: boolean;
+  sceneReady: boolean;
+  sceneName: string | null;
+  sourceName: string | null;
+  matchedWindow: string | null;
   errorMessage: string | null;
 };
 
