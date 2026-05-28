@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useEffectEvent, useMemo, useRef, useState, type ReactNode } from "react";
 import { TimelineMarkerRail } from "../../shared/components/TimelineMarkerRail";
 import { api } from "../../shared/lib/api";
 import type {
@@ -6,6 +6,7 @@ import type {
   CoachKnowledgeParameterItem,
   CoachSkillItem,
   FirstRunBootstrapStatus,
+  LiveArenaSessionStatus,
   MatchBenchmarkComparisonItem,
   MatchLibraryItem,
   MatchParticipantReviewItem,
@@ -22,7 +23,7 @@ import type {
 } from "../../shared/types/api";
 import "../../shared/styles/home-page.css";
 import "../../shared/types/desktop";
-import type { DesktopObsLaunchStatus, DesktopWowWindow } from "../../shared/types/desktop";
+import type { DesktopCaptureSource, DesktopObsLaunchStatus, DesktopWowWindow } from "../../shared/types/desktop";
 
 const emptySettings: AppSettings = {
   id: 1,
@@ -222,6 +223,16 @@ function titleize(input: string | null | undefined) {
     .filter(Boolean)
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
+}
+
+function getPreferredRecorderMimeType() {
+  const candidates = [
+    "video/webm;codecs=vp9,opus",
+    "video/webm;codecs=vp8,opus",
+    "video/webm",
+  ];
+
+  return candidates.find((candidate) => MediaRecorder.isTypeSupported(candidate)) ?? "";
 }
 
 function initials(input: string | null | undefined) {
@@ -785,6 +796,17 @@ export function HomePage() {
   const [captureMode, setCaptureMode] = useState<CaptureMode>("window");
   const [captureCursor, setCaptureCursor] = useState(true);
   const [sceneTarget, setSceneTarget] = useState<"wow-a" | "wow-b" | "auto">("auto");
+  const [liveArenaSession, setLiveArenaSession] = useState<LiveArenaSessionStatus | null>(null);
+  const [embeddedPreviewLabel, setEmbeddedPreviewLabel] = useState<string | null>(null);
+  const [embeddedPreviewError, setEmbeddedPreviewError] = useState<string | null>(null);
+  const [isEmbeddedRecording, setIsEmbeddedRecording] = useState(false);
+  const previewVideoRef = useRef<HTMLVideoElement | null>(null);
+  const previewStreamRef = useRef<MediaStream | null>(null);
+  const previewSourceRef = useRef<DesktopCaptureSource | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordedChunksRef = useRef<Blob[]>([]);
+  const autoRecordingArmedRef = useRef(false);
+  const lastAttachedMatchIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     void loadDashboard();
@@ -810,6 +832,38 @@ export function HomePage() {
     await refreshSceneAutomation();
   });
 
+  const syncEmbeddedPreview = useEffectEvent(async () => {
+    const selectedWindow = getSelectedWowWindow();
+    if (!selectedWindow) {
+      stopEmbeddedPreview();
+      return;
+    }
+
+    await ensureEmbeddedPreview(selectedWindow);
+  });
+
+  const pollLiveArenaSession = useEffectEvent(async () => {
+    const status = await api.getLiveArenaSession();
+    setLiveArenaSession(status);
+
+    if (status.isActive && status.shouldTrack && settings.enableRecording) {
+      if (!autoRecordingArmedRef.current) {
+        await startEmbeddedRecording();
+      }
+
+      return;
+    }
+
+    if (
+      !status.isActive &&
+      autoRecordingArmedRef.current &&
+      status.lastCompletedMatchId &&
+      status.lastCompletedMatchId !== lastAttachedMatchIdRef.current
+    ) {
+      await finalizeEmbeddedRecording(status.lastCompletedMatchId, status.bracket);
+    }
+  });
+
   useEffect(() => {
     if (activeView !== "scene") {
       return;
@@ -817,6 +871,61 @@ export function HomePage() {
 
     void runSceneAutomationRefresh();
   }, [activeView]);
+
+  useEffect(() => {
+    if (activeView !== "scene") {
+      return;
+    }
+
+    void syncEmbeddedPreview().catch((error) => {
+      setEmbeddedPreviewError(error instanceof Error ? error.message : "Failed to start the embedded WoW preview.");
+    });
+  }, [activeView, sceneTarget, wowWindows]);
+
+  useEffect(() => {
+    if (!window.arenaGodEyesDesktop?.isDesktop) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const poll = async () => {
+      try {
+        await pollLiveArenaSession();
+      } catch (error) {
+        if (!cancelled) {
+          setEmbeddedPreviewError(error instanceof Error ? error.message : "Failed to poll live arena session state.");
+        }
+      }
+    };
+
+    void poll();
+    const interval = window.setInterval(() => {
+      void poll();
+    }, 2000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [settings.enableRecording, settings.recordingDirectory, wowWindows, sceneTarget]);
+
+  useEffect(() => {
+    return () => {
+      stopEmbeddedPreview();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!previewVideoRef.current || !previewStreamRef.current) {
+      return;
+    }
+
+    previewVideoRef.current.srcObject = previewStreamRef.current;
+    previewVideoRef.current.muted = true;
+    previewVideoRef.current.playsInline = true;
+    void previewVideoRef.current.play().catch(() => undefined);
+  }, [embeddedPreviewLabel, activeView]);
 
   const pendingAnalyses = useMemo(
     () => matches.filter((match) => !match.hasManualAnalysis).length,
@@ -934,6 +1043,186 @@ export function HomePage() {
     },
     [settings.wowRetailPath, wowWindows],
   );
+
+  function stopEmbeddedPreview() {
+    previewStreamRef.current?.getTracks().forEach((track) => track.stop());
+    previewStreamRef.current = null;
+    previewSourceRef.current = null;
+    if (previewVideoRef.current) {
+      previewVideoRef.current.srcObject = null;
+    }
+  }
+
+  function getSelectedWowWindow() {
+    if (wowWindows.length === 0) {
+      return null;
+    }
+
+    if (wowWindows.length === 1) {
+      return wowWindows[0];
+    }
+
+    if (sceneTarget === "wow-b") {
+      return wowWindows[1] ?? wowWindows[0];
+    }
+
+    return wowWindows[0];
+  }
+
+  async function resolveCaptureSource(windowTarget?: DesktopWowWindow | null) {
+    const desktopBridge = window.arenaGodEyesDesktop;
+    if (!desktopBridge?.isDesktop) {
+      return null;
+    }
+
+    const selectedWindow = windowTarget ?? getSelectedWowWindow();
+    if (!selectedWindow) {
+      return null;
+    }
+
+    const sources = await desktopBridge.listCaptureSources();
+    const normalizedTitle = selectedWindow.title.trim().toLowerCase();
+    const normalizedProcess = (selectedWindow.executableName ?? selectedWindow.processName).trim().toLowerCase();
+
+    return (
+      sources.find((source) => source.name.trim().toLowerCase() === normalizedTitle) ??
+      sources.find((source) => source.name.trim().toLowerCase().includes(normalizedTitle)) ??
+      sources.find((source) => normalizedTitle.includes(source.name.trim().toLowerCase())) ??
+      sources.find((source) => source.name.trim().toLowerCase().includes(normalizedProcess)) ??
+      null
+    );
+  }
+
+  async function ensureEmbeddedPreview(windowTarget?: DesktopWowWindow | null) {
+    const selectedWindow = windowTarget ?? getSelectedWowWindow();
+    if (!selectedWindow) {
+      stopEmbeddedPreview();
+      setEmbeddedPreviewLabel(null);
+      setEmbeddedPreviewError("WoW capture target not detected yet.");
+      return null;
+    }
+
+    const source = await resolveCaptureSource(selectedWindow);
+    if (!source) {
+      stopEmbeddedPreview();
+      setEmbeddedPreviewLabel(selectedWindow.title);
+      setEmbeddedPreviewError("The app detected WoW, but Windows did not expose a matching desktop capture source yet.");
+      return null;
+    }
+
+    if (previewSourceRef.current?.id === source.id && previewStreamRef.current) {
+      setEmbeddedPreviewLabel(source.name);
+      setEmbeddedPreviewError(null);
+      return previewStreamRef.current;
+    }
+
+    stopEmbeddedPreview();
+
+    const constraints = {
+      audio: false,
+      video: {
+        mandatory: {
+          chromeMediaSource: "desktop",
+          chromeMediaSourceId: source.id,
+          minWidth: 1280,
+          maxWidth: 2560,
+          minHeight: 720,
+          maxHeight: 1440,
+          minFrameRate: 30,
+          maxFrameRate: 60,
+        },
+      },
+    } as MediaStreamConstraints;
+
+    const stream = await navigator.mediaDevices.getUserMedia(constraints);
+    previewStreamRef.current = stream;
+    previewSourceRef.current = source;
+    setEmbeddedPreviewLabel(source.name);
+    setEmbeddedPreviewError(null);
+
+    if (previewVideoRef.current) {
+      previewVideoRef.current.srcObject = stream;
+      previewVideoRef.current.muted = true;
+      previewVideoRef.current.playsInline = true;
+      void previewVideoRef.current.play().catch(() => undefined);
+    }
+
+    return stream;
+  }
+
+  async function finalizeEmbeddedRecording(matchId: string | null, bracket: string | null) {
+    const recorder = mediaRecorderRef.current;
+    if (!recorder) {
+      return;
+    }
+
+    const stopped = new Promise<Blob>((resolve) => {
+      recorder.onstop = () => {
+        const blob = new Blob(recordedChunksRef.current, { type: recorder.mimeType || "video/webm" });
+        recordedChunksRef.current = [];
+        mediaRecorderRef.current = null;
+        resolve(blob);
+      };
+    });
+
+    recorder.stop();
+    const blob = await stopped;
+    setIsEmbeddedRecording(false);
+    autoRecordingArmedRef.current = false;
+
+    if (!matchId || !settings.recordingDirectory) {
+      setStatusMessage("Match finished, but there is no recording directory or imported match id yet.");
+      return;
+    }
+
+    const startedAtToken = liveArenaSession?.startedAt
+      ? liveArenaSession.startedAt.replace(/[:.]/g, "-")
+      : new Date().toISOString().replace(/[:.]/g, "-");
+    const safeBracket = (bracket ?? "arena").replace(/[^a-z0-9_-]+/gi, "-");
+    const fileName = `${matchId}-${safeBracket}-${startedAtToken}.webm`;
+    const arrayBuffer = await blob.arrayBuffer();
+    const savedPath = await window.arenaGodEyesDesktop?.saveRecordingBuffer({
+      directoryPath: settings.recordingDirectory,
+      fileName,
+      arrayBuffer,
+    });
+
+    if (!savedPath) {
+      throw new Error("The desktop app could not persist the recorded arena video.");
+    }
+
+    await api.attachVideo(matchId, savedPath);
+    await refreshMatches(matchId);
+    await loadMatch(matchId);
+    lastAttachedMatchIdRef.current = matchId;
+    setStatusMessage(`Arena video saved and attached to ${matchId}.`);
+  }
+
+  async function startEmbeddedRecording() {
+    if (isEmbeddedRecording || mediaRecorderRef.current) {
+      return;
+    }
+
+    const stream = await ensureEmbeddedPreview();
+    if (!stream) {
+      return;
+    }
+
+    recordedChunksRef.current = [];
+    const mimeType = getPreferredRecorderMimeType();
+    const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+    recorder.ondataavailable = (event) => {
+      if (event.data.size > 0) {
+        recordedChunksRef.current.push(event.data);
+      }
+    };
+
+    recorder.start(1000);
+    mediaRecorderRef.current = recorder;
+    autoRecordingArmedRef.current = true;
+    setIsEmbeddedRecording(true);
+    setStatusMessage("Arena recorder armed. The desktop app is capturing the WoW window directly.");
+  }
 
   async function loadDashboard() {
     setIsBusy(true);
@@ -1081,19 +1370,6 @@ export function HomePage() {
     }
   }
 
-  async function handleRefreshObsStatus() {
-    setIsBusy(true);
-    try {
-      const result = await api.getObsStatus();
-      setObsStatus(result);
-      setStatusMessage(result.errorMessage ?? "OBS status refreshed.");
-    } catch (error) {
-      setStatusMessage(error instanceof Error ? error.message : "Failed to load OBS status.");
-    } finally {
-      setIsBusy(false);
-    }
-  }
-
   async function handleTestObsConnection() {
     setIsBusy(true);
     try {
@@ -1110,11 +1386,9 @@ export function HomePage() {
   async function handleStartObsRecording() {
     setIsBusy(true);
     try {
-      const result = await api.startObsRecording(selectedMatchId);
-      await handleRefreshObsStatus();
-      setStatusMessage(result.message ?? "OBS recording started.");
+      await startEmbeddedRecording();
     } catch (error) {
-      setStatusMessage(error instanceof Error ? error.message : "Failed to start OBS recording.");
+      setStatusMessage(error instanceof Error ? error.message : "Failed to start the in-app recorder.");
     } finally {
       setIsBusy(false);
     }
@@ -1123,31 +1397,12 @@ export function HomePage() {
   async function handleStopObsRecording() {
     setIsBusy(true);
     try {
-      const result = await api.stopObsRecording(selectedMatchId);
-      await refreshMatches(selectedMatchId);
-      await handleRefreshObsStatus();
-      setStatusMessage(result.message ?? "OBS recording stopped.");
+      await finalizeEmbeddedRecording(selectedMatchId, selectedMatch?.match.bracket ?? null);
     } catch (error) {
-      setStatusMessage(error instanceof Error ? error.message : "Failed to stop OBS recording.");
+      setStatusMessage(error instanceof Error ? error.message : "Failed to stop the in-app recorder.");
     } finally {
       setIsBusy(false);
     }
-  }
-
-  function getSelectedWowWindow() {
-    if (wowWindows.length === 0) {
-      return null;
-    }
-
-    if (wowWindows.length === 1) {
-      return wowWindows[0];
-    }
-
-    if (sceneTarget === "wow-b") {
-      return wowWindows[1] ?? wowWindows[0];
-    }
-
-    return wowWindows[0];
   }
 
   async function handlePrepareObsScene(windowOverride?: DesktopWowWindow | null) {
@@ -1202,19 +1457,23 @@ export function HomePage() {
       const latestObsStatus = await api.getObsStatus();
       setObsStatus(latestObsStatus);
 
-      if (windows.length > 0 && latestObsStatus.isReachable) {
+      if (windows.length > 0) {
         const preferredWindow =
           sceneTarget === "wow-b"
             ? windows[1] ?? windows[0]
             : windows[0];
-        await handlePrepareObsScene(preferredWindow);
-        return;
+        await ensureEmbeddedPreview(preferredWindow);
+
+        if (latestObsStatus.isReachable) {
+          await handlePrepareObsScene(preferredWindow);
+          return;
+        }
       }
 
       if (windows.length === 0) {
         setStatusMessage("WoW is not visible yet. Open the character window before testing Scene detection.");
       } else if (!latestObsStatus.isReachable) {
-        setStatusMessage(latestObsStatus.errorMessage ?? "OBS is not reachable yet.");
+        setStatusMessage("WoW preview is available in-app. OBS automation is still unavailable, so fallback recording is active.");
       }
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : "Failed to refresh Scene automation.");
@@ -2093,6 +2352,7 @@ export function HomePage() {
   function renderSceneScreen() {
     const selectedWowWindow = getSelectedWowWindow();
     const previewSource = selectedMatch?.match.videoLocalPath ?? selectedMatch?.match.thumbnailPath ?? null;
+    const hasEmbeddedPreview = Boolean(previewStreamRef.current);
 
     return (
       <div className="workspace-page">
@@ -2121,8 +2381,16 @@ export function HomePage() {
         </header>
 
         <section className="scene-preview-card">
-          <div className={previewSource ? "scene-preview-frame" : "scene-detection-banner"}>
-            {previewSource ? (
+          <div className={hasEmbeddedPreview || previewSource ? "scene-preview-frame" : "scene-detection-banner"}>
+            {hasEmbeddedPreview ? (
+              <video
+                ref={previewVideoRef}
+                autoPlay
+                className="scene-video"
+                muted
+                playsInline
+              />
+            ) : previewSource ? (
               selectedMatch?.match.videoLocalPath ? (
                 <video
                   className="scene-video"
@@ -2139,11 +2407,13 @@ export function HomePage() {
             ) : (
               <div className="scene-empty compact">
                 <Glyph name="scene" />
-                <strong>{selectedWowWindow ? selectedWowWindow.title : "WoW capture target not detected yet."}</strong>
+                <strong>{embeddedPreviewLabel ?? selectedWowWindow?.title ?? "WoW capture target not detected yet."}</strong>
                 <p>
-                  {selectedWowWindow
-                    ? `Detected ${selectedWowWindow.executableName ?? selectedWowWindow.processName}. The app can prepare capture, but live embedded preview is not implemented yet.`
-                    : "Open a visible WoW window and the Scene tab will detect it here."}
+                  {embeddedPreviewError
+                    ? embeddedPreviewError
+                    : selectedWowWindow
+                      ? `Detected ${selectedWowWindow.executableName ?? selectedWowWindow.processName}. The live embedded preview is preparing.`
+                      : "Open a visible WoW window and the Scene tab will detect it here."}
                 </p>
               </div>
             )}
@@ -2183,6 +2453,9 @@ export function HomePage() {
                   <span className={`info-pill ${wowWindows.length > 0 ? "good" : ""}`}>
                     {wowWindows.length > 0 ? `${wowWindows.length} WoW window(s) detected` : "WoW window not detected"}
                   </span>
+                  <span className={`info-pill ${previewStreamRef.current ? "good" : ""}`}>
+                    {previewStreamRef.current ? "Embedded preview live" : "Embedded preview pending"}
+                  </span>
                   <span className={`info-pill ${obsLaunchStatus?.detected ? "good" : ""}`}>
                     {obsLaunchStatus?.detected ? "OBS process detected" : "OBS process pending"}
                   </span>
@@ -2220,7 +2493,12 @@ export function HomePage() {
                   <span className="info-pill">
                     Selected target: {selectedWowWindow?.title ?? (sceneTarget === "auto" ? "Auto" : titleize(sceneTarget))}
                   </span>
-                  <span className="info-pill">{settings.enableRecording ? "Recording ready" : "Recording disabled"}</span>
+                  <span className={`info-pill ${settings.enableRecording ? "good" : ""}`}>
+                    {settings.enableRecording ? "App recorder armed" : "Recording disabled"}
+                  </span>
+                  <span className={`info-pill ${isEmbeddedRecording ? "good" : ""}`}>
+                    {isEmbeddedRecording ? "Recording in progress" : "Recorder idle"}
+                  </span>
                   {selectedWowWindow ? (
                     <span className="info-pill good">
                       {selectedWowWindow.title} / {selectedWowWindow.className}

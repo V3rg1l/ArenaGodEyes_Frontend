@@ -288,6 +288,18 @@ export type SystemStatus = {
   utcNow: string;
 };
 
+export type LiveArenaSessionStatus = {
+  isActive: boolean;
+  bracket: string | null;
+  isRanked: boolean;
+  shouldTrack: boolean;
+  sourceFile: string | null;
+  startedAt: string | null;
+  startedRecordingAutomatically: boolean;
+  lastCompletedMatchId: string | null;
+  lastCompletedAt: string | null;
+};
+
 export type ObsConnectionStatus = {
   isConfigured: boolean;
   isReachable: boolean;

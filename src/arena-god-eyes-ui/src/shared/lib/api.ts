@@ -3,6 +3,7 @@ import type {
   ChatGptPromptExport,
   FirstRunBootstrapStatus,
   ImportedMatchesResult,
+  LiveArenaSessionStatus,
   ManualAnalysisImportResult,
   MatchLibraryItem,
   MatchReviewDetails,
@@ -49,6 +50,7 @@ async function request<T>(
 export const api = {
   getSystemStatus: () => request<SystemStatus>("/api/system/status"),
   getBootstrapStatus: () => request<FirstRunBootstrapStatus>("/api/system/bootstrap-status"),
+  getLiveArenaSession: () => request<LiveArenaSessionStatus>("/api/system/live-session"),
   getSettings: () => request<AppSettings>("/api/settings"),
   saveSettings: (settings: AppSettings) =>
     request<AppSettings>("/api/settings", {
