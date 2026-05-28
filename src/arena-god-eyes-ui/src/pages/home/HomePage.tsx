@@ -3183,23 +3183,17 @@ export function HomePage() {
   }
 
   function renderDiagnosticsScreen() {
+    const recorderReady = Boolean(settings.enableRecording && settings.recordingDirectory);
+
     return (
       <div className="workspace-page narrow-page">
         <header className="page-header">
           <div>
             <p className="eyebrow">Diagnostics</p>
-            <h1>App-level logs and diagnostics</h1>
+            <h1>Workspace health</h1>
             <p className="page-copy">
-              This area is for ArenaGodEyes health, recorder diagnostics, and local setup signals. Match-level exports stay inside the selected replay workspace.
+              Quick product health, storage visibility, and recording readiness. Deep exports stay inside each replay review.
             </p>
-          </div>
-          <div className="page-actions">
-            <button onClick={handleValidateSettings} disabled={isBusy} type="button">
-              Validate setup
-            </button>
-            <button onClick={handleTestObsConnection} disabled={isBusy} type="button">
-              Test OBS
-            </button>
           </div>
         </header>
         <div className="verification-grid">
@@ -3212,15 +3206,16 @@ export function HomePage() {
           </article>
           <article className="summary-card">
             <div className="summary-card-topline">
-              <strong>Recorder</strong>
-              <span className={`tone-chip tone-${obsStatus?.isReachable ? "success" : "warning"}`}>
-                {obsStatus?.isReachable ? "Ready" : "Attention"}
+              <strong>Capture pipeline</strong>
+              <span className={`tone-chip tone-${recorderReady ? "success" : "warning"}`}>
+                {recorderReady ? "Ready" : "Needs setup"}
               </span>
             </div>
-            <p>{obsStatus?.errorMessage ?? obsStatus?.outputPath ?? "No recorder diagnostics yet."}</p>
-            {bootstrapStatus?.pendingActions.includes("restart_obs") ? (
-              <p className="muted-copy">Restart OBS once so the local WebSocket server can come up on port 4455.</p>
-            ) : null}
+            <p>
+              {recorderReady
+                ? `Arena recordings will be written to ${settings.recordingDirectory}.`
+                : "Recording is still disabled or the local recording folder is missing."}
+            </p>
           </article>
           <article className="summary-card">
             <div className="summary-card-topline">
@@ -3240,18 +3235,10 @@ export function HomePage() {
         <header className="page-header">
           <div>
             <p className="eyebrow">Verify Setup</p>
-            <h1>Local diagnostics</h1>
+            <h1>Setup summary</h1>
             <p className="page-copy">
-              Keep WoW detection, addon health, backend readiness, and OBS connectivity in one operational panel.
+              Keep WoW detection, addon health, backend readiness, and recording readiness in one lightweight panel.
             </p>
-          </div>
-          <div className="page-actions">
-            <button onClick={handleValidateSettings} disabled={isBusy} type="button">
-              Validate
-            </button>
-            <button onClick={handleTestObsConnection} disabled={isBusy} type="button">
-              Test OBS
-            </button>
           </div>
         </header>
         <div className="verification-grid">
@@ -3273,12 +3260,12 @@ export function HomePage() {
           </article>
           <article className="summary-card">
             <div className="summary-card-topline">
-              <strong>OBS</strong>
-              <span className={`tone-chip tone-${obsStatus?.isReachable ? "success" : "warning"}`}>
-                {obsStatus?.isReachable ? "Connected" : "Pending"}
+              <strong>Recording</strong>
+              <span className={`tone-chip tone-${settings.enableRecording ? "success" : "warning"}`}>
+                {settings.enableRecording ? "Enabled" : "Disabled"}
               </span>
             </div>
-            <p>{obsStatus?.errorMessage ?? obsStatus?.outputPath ?? "Connection test pending."}</p>
+            <p>{settings.recordingDirectory ?? "No recording location configured yet."}</p>
             {bootstrapStatus?.pendingActions.length ? (
               <p className="muted-copy">Pending bootstrap actions: {bootstrapStatus.pendingActions.join(", ")}</p>
             ) : null}
