@@ -8,6 +8,10 @@ The frontend is not the whole product.
 
 It is the UI that will be hosted by Electron and powered by the local .NET backend.
 
+React + Vite is the renderer only.
+
+The UI must feel like real installed desktop coach software, not like a normal website.
+
 ## Layout
 
 - `src/arena-god-eyes-ui`
@@ -44,3 +48,13 @@ Use the local references in:
 - `ArenaGodEyes.Docs/src/skills`
 - `ArenaGodEyes.Docs/src/images`
 - `ArenaGodEyes.Docs/src/images/IdeaisLayoutUIiUx`
+- `ArenaGodEyes.Docs/src/DESKTOP_UI_UX_DIRECTION.md`
+
+Key expectations:
+
+- left desktop sidebar
+- top status bar
+- dense match and clip cards
+- desktop settings tabs
+- review workstation with large video player and timeline
+- premium dark palette
