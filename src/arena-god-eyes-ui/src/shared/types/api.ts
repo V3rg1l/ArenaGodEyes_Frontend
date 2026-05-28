@@ -45,6 +45,7 @@ export type MatchLibraryItem = {
   durationSeconds: number;
   resultForPlayer: string | null;
   playerName: string | null;
+  playerClassName: string | null;
   playerSpecLabel: string | null;
   hasVideo: boolean;
   hasManualAnalysis: boolean;
@@ -71,6 +72,7 @@ export type MatchReviewDetails = {
   matchJson: string;
   promptText: string | null;
   manualAnalysisText: string | null;
+  specPerformanceSnapshot: SpecPerformanceSnapshotItem | null;
   metricSummary: MatchMetricSummaryItem | null;
   spellMetrics: MatchSpellMetricItem[];
   coachKnowledgeParameters: CoachKnowledgeParameterItem[];
@@ -94,13 +96,20 @@ export type MatchMetricSummaryItem = {
 
 export type MatchSpellMetricItem = {
   spellName: string;
+  normalizedSpellName: string;
   castCount: number;
   totalDamage: number;
   totalHealing: number;
+  className: string | null;
+  specLabel: string | null;
+  primaryCategory: string | null;
+  tacticalPhase: string | null;
+  isSignatureSpell: boolean;
 };
 
 export type CoachKnowledgeParameterItem = {
   scope: string;
+  className: string | null;
   specLabel: string | null;
   category: string;
   metric: string;
@@ -114,6 +123,7 @@ export type CoachKnowledgeParameterItem = {
 
 export type CoachSkillItem = {
   scope: string;
+  className: string | null;
   specLabel: string | null;
   area: string;
   goal: string;
@@ -132,6 +142,18 @@ export type AnalysisInsightItem = {
   evidence: string | null;
   recommendation: string | null;
   source: string;
+};
+
+export type SpecPerformanceSnapshotItem = {
+  className: string | null;
+  specLabel: string | null;
+  recognizedSpellCount: number;
+  coreSpellUsageCount: number;
+  burstSpellUsageCount: number;
+  defensiveSpellUsageCount: number;
+  controlSpellUsageCount: number;
+  interruptSpellUsageCount: number;
+  mobilitySpellUsageCount: number;
 };
 
 export type ValidationTargetItem = {

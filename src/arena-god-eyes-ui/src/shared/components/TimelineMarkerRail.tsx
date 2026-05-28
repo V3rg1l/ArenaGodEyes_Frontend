@@ -16,17 +16,17 @@ function formatSeconds(totalSeconds: number) {
 function categorySymbol(category: string) {
   switch (category.toLowerCase()) {
     case "mistake":
-      return "!";
+      return "MS";
     case "defensive":
-      return "D";
+      return "DF";
     case "cc":
-      return "C";
+      return "CC";
     case "interrupt":
-      return "I";
+      return "IN";
     case "improvement":
-      return "+";
+      return "UP";
     default:
-      return "•";
+      return "EV";
   }
 }
 
@@ -67,7 +67,10 @@ export function TimelineMarkerRail({
             >
               <div className="marker-time">{formatSeconds(marker.videoSecond)}</div>
               <div>
-                <h3>{marker.label}</h3>
+                <div className="marker-label-row">
+                  <h3>{marker.label}</h3>
+                  <span className="marker-category-pill">{marker.category}</span>
+                </div>
                 <p>{marker.description}</p>
               </div>
             </article>
