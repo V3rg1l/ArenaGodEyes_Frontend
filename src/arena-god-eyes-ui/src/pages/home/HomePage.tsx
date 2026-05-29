@@ -1170,8 +1170,8 @@ export function HomePage() {
     setIsEmbeddedRecording(false);
     autoRecordingArmedRef.current = false;
 
-    if (!matchId || !settings.recordingDirectory) {
-      setStatusMessage("Match finished, but there is no recording directory or imported match id yet.");
+    if (!settings.recordingDirectory) {
+      setStatusMessage("Match finished, but there is no recording directory configured yet.");
       return;
     }
 
@@ -1179,7 +1179,8 @@ export function HomePage() {
       ? liveArenaSession.startedAt.replace(/[:.]/g, "-")
       : new Date().toISOString().replace(/[:.]/g, "-");
     const safeBracket = (bracket ?? "arena").replace(/[^a-z0-9_-]+/gi, "-");
-    const fileName = `${matchId}-${safeBracket}-${startedAtToken}.webm`;
+    const resolvedMatchId = matchId?.trim() || `pending-${safeBracket}`;
+    const fileName = `${resolvedMatchId}-${startedAtToken}.webm`;
     const arrayBuffer = await blob.arrayBuffer();
     const savedPath = await window.arenaGodEyesDesktop?.saveRecordingBuffer({
       directoryPath: settings.recordingDirectory,
@@ -1189,6 +1190,11 @@ export function HomePage() {
 
     if (!savedPath) {
       throw new Error("The desktop app could not persist the recorded arena video.");
+    }
+
+    if (!matchId) {
+      setStatusMessage(`Arena video saved to ${savedPath}, but the match import did not finish in time to attach it automatically.`);
+      return;
     }
 
     await api.attachVideo(matchId, savedPath);
