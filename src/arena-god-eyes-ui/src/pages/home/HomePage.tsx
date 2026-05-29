@@ -832,6 +832,15 @@ export function HomePage() {
     await refreshSceneAutomation();
   });
 
+  const refreshValidationSummary = useEffectEvent(async () => {
+    try {
+      const result = await api.validateSettings(settings);
+      setValidation(result);
+    } catch {
+      // Keep the workspace usable even if validation cannot be refreshed right now.
+    }
+  });
+
   const syncEmbeddedPreview = useEffectEvent(async () => {
     const selectedWindow = getSelectedWowWindow();
     if (!selectedWindow) {
@@ -909,6 +918,14 @@ export function HomePage() {
       window.clearInterval(interval);
     };
   }, [settings.enableRecording, settings.recordingDirectory, wowWindows, sceneTarget]);
+
+  useEffect(() => {
+    if (activeView !== "settings" && activeView !== "diagnostics" && activeView !== "verify") {
+      return;
+    }
+
+    void refreshValidationSummary();
+  }, [activeView, refreshValidationSummary]);
 
   useEffect(() => {
     return () => {
@@ -1247,8 +1264,12 @@ export function HomePage() {
       setMatches(matchesResult);
       setStorageOverview(storageOverviewResult);
       setSelectedMatchId((current) => current ?? matchesResult[0]?.matchId ?? null);
-      const latestObsStatus = await api.getObsStatus();
+      const [latestObsStatus, latestValidation] = await Promise.all([
+        api.getObsStatus(),
+        api.validateSettings(settingsResult),
+      ]);
       setObsStatus(latestObsStatus);
+      setValidation(latestValidation);
       setStatusMessage(
         bootstrapStatusResult.pendingActions.length > 0
           ? `Bootstrap pending: ${bootstrapStatusResult.pendingActions.join(", ")}.`
@@ -1298,24 +1319,13 @@ export function HomePage() {
     try {
       const updated = await api.saveSettings(settings);
       const updatedStorageOverview = await api.getStorageOverview();
+      const updatedValidation = await api.validateSettings(updated);
       setSettings(updated);
       setStorageOverview(updatedStorageOverview);
+      setValidation(updatedValidation);
       setStatusMessage("Settings saved locally.");
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : "Failed to save settings.");
-    } finally {
-      setIsBusy(false);
-    }
-  }
-
-  async function handleValidateSettings() {
-    setIsBusy(true);
-    try {
-      const result = await api.validateSettings(settings);
-      setValidation(result);
-      setStatusMessage(result.isValid ? "Settings look healthy." : "Settings need attention.");
-    } catch (error) {
-      setStatusMessage(error instanceof Error ? error.message : "Failed to validate settings.");
     } finally {
       setIsBusy(false);
     }
@@ -1371,19 +1381,6 @@ export function HomePage() {
       setStatusMessage("Addon copied to the configured WoW folder.");
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : "Failed to install addon.");
-    } finally {
-      setIsBusy(false);
-    }
-  }
-
-  async function handleTestObsConnection() {
-    setIsBusy(true);
-    try {
-      const result = await api.testObsConnection();
-      setObsStatus(result);
-      setStatusMessage(result.isReachable ? "OBS connection succeeded." : result.errorMessage ?? "OBS connection failed.");
-    } catch (error) {
-      setStatusMessage(error instanceof Error ? error.message : "Failed to test OBS.");
     } finally {
       setIsBusy(false);
     }
@@ -1866,9 +1863,6 @@ export function HomePage() {
             <button onClick={handleSaveSettings} disabled={isBusy} type="button">
               Save Changes
             </button>
-            <button onClick={handleValidateSettings} disabled={isBusy} type="button">
-              Validate Setup
-            </button>
           </div>
         </header>
 
@@ -2051,13 +2045,13 @@ export function HomePage() {
                 title="Addon Status"
                 description="Install or reinstall the addon used for safe combat log capture and arena metadata."
                 controls={
-                  <div className="inline-button-group">
+                  <div className="inline-stat-group">
                     <button onClick={handleInstallAddon} disabled={isBusy} type="button">
                       Install Addon
                     </button>
-                    <button onClick={handleValidateSettings} disabled={isBusy} type="button">
-                      Validate Setup
-                    </button>
+                    <span className={`info-pill ${validation?.isValid ? "good" : ""}`}>
+                      {validation?.isValid ? "Setup healthy" : "Setup review in progress"}
+                    </span>
                   </div>
                 }
               />
@@ -2211,18 +2205,15 @@ export function HomePage() {
               />
               <SettingsRow
                 title="Connection actions"
-                description="Validate the recorder from the product layer."
+                description="Recorder health stays visible here without requiring manual test buttons in the main workflow."
                 controls={
-                  <div className="inline-button-group">
-                    <button onClick={handleTestObsConnection} disabled={isBusy} type="button">
-                      Test connection
-                    </button>
-                    <button onClick={handleStartObsRecording} disabled={isBusy} type="button">
-                      Start test recording
-                    </button>
-                    <button onClick={handleStopObsRecording} disabled={isBusy} type="button">
-                      Stop test recording
-                    </button>
+                  <div className="inline-stat-group">
+                    <span className={`info-pill ${obsStatus?.isReachable ? "good" : ""}`}>
+                      {obsStatus?.isReachable ? "Recorder reachable" : "Recorder offline"}
+                    </span>
+                    <span className={`info-pill ${isEmbeddedRecording ? "good" : ""}`}>
+                      {isEmbeddedRecording ? "Live capture running" : "Waiting for arena"}
+                    </span>
                   </div>
                 }
               />
